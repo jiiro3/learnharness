@@ -7,4 +7,4 @@ auth.json
 *-credentials.json
 .env
 .env.*
-android
+/android
