@@ -124,3 +124,48 @@ function isEditable(el: Element | null): boolean {
 	if (el instanceof HTMLInputElement) return !["button", "checkbox", "radio", "range", "submit", "file"].includes(el.type);
 	return (el as HTMLElement).isContentEditable === true;
 }
+
+/**
+ * THE ANDROID BACK BRIDGE (fork: mobile-layout). The Android shell calls
+ * `window.__lhBack()` on the system Back gesture before it touches WebView
+ * history: true means the page closed something, so Back stops there.
+ *
+ * Back is one Esc on the topmost layer (the ONE-ESC LAW): every surfaced
+ * layer (sheets, settings, menus, popovers, dialogs) already claims Esc at
+ * the DOCUMENT level, so a synthetic Esc dispatched there closes exactly the
+ * top one. It counts as handled when a layer prevented its default or
+ * stopped it before the window. The window-level fallback chain (dictation,
+ * then abort the turn) skips back-flagged events (isShellBack), so Back
+ * never aborts a turn. Field-level handlers never see it (the target is
+ * the document, not the focused field).
+ */
+export function isShellBack(e: Event): boolean {
+	return (e as Event & { lhShellBack?: boolean }).lhShellBack === true;
+}
+
+function shellBack(): boolean {
+	let reachedWindow = false;
+	const mark = (e: KeyboardEvent) => {
+		if (isShellBack(e)) reachedWindow = true;
+	};
+	window.addEventListener("keydown", mark);
+	const esc = new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true, cancelable: true });
+	Object.defineProperty(esc, "lhShellBack", { value: true });
+	try {
+		document.dispatchEvent(esc);
+	} finally {
+		window.removeEventListener("keydown", mark);
+	}
+	return esc.defaultPrevented || !reachedWindow;
+}
+
+/** Installs window.__lhBack for the Android shell (inert elsewhere). */
+export function useShellBackBridge(): void {
+	useEffect(() => {
+		const w = window as Window & { __lhBack?: () => boolean };
+		w.__lhBack = shellBack;
+		return () => {
+			if (w.__lhBack === shellBack) delete w.__lhBack;
+		};
+	}, []);
+}

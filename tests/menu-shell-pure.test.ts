@@ -80,3 +80,21 @@ describe("computeMenuPlacement — cap + position", () => {
 		assert.ok(!("right" in p.style));
 	});
 });
+describe("computeMenuPlacement — horizontal clamp (phone)", () => {
+	const phone = { width: 360, height: 800 };
+	it("shifts a right-aligned menu that would run off the left edge back inside the 8px gutter", () => {
+		// A 352px-wide menu anchored to a pill whose right edge is at x=250.
+		const p = computeMenuPlacement({ top: 700, bottom: 730, left: 150, right: 250 }, phone, 300, "up", "right", 300);
+		assert.equal(p.style.left, 8);
+		assert.equal(p.style.right, undefined);
+	});
+	it("caps a menu wider than the viewport to the gutters", () => {
+		const p = computeMenuPlacement({ top: 700, bottom: 730, left: 150, right: 250 }, phone, 300, "up", "right", 352);
+		assert.deepEqual([p.style.left, p.style.maxWidth], [8, 344]);
+	});
+	it("leaves a menu that already fits anchor-aligned", () => {
+		const p = computeMenuPlacement({ top: 700, bottom: 730, left: 150, right: 350 }, phone, 300, "up", "right", 200);
+		assert.equal(p.style.right, 10);
+		assert.equal(p.style.left, undefined);
+	});
+});

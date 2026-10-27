@@ -65,6 +65,7 @@ import {
 	type CompactionDividerData,
 } from "@/components/compaction-divider";
 import { CoverageRing } from "@/components/extraction-coverage";
+import { isPhoneNow } from "@/components/phone";
 import {
 	activeProblemOf,
 	dismissedAnswer,
@@ -1830,6 +1831,21 @@ export function shouldStampGeometryMute(nextH: number, prevH: number, pending: b
 	return pending && nextH > prevH + 1;
 }
 
+/**
+ * Phone (fork: mobile-layout): the dock block's height OUTSIDE its scroll
+ * areas (the confidence row, the answer field, the setup CTA, padding).
+ * --dock-max-h caps only the scroll area, so on a phone column (about half
+ * as tall with the keyboard up) the rest pushed the dock's top — the
+ * question stem — above the top bar, where nothing could scroll it back.
+ * The cap subtracts this on a phone; zero on desktop (unchanged there).
+ */
+function phoneDockChrome(block: HTMLElement | null): number {
+	if (!block || !isPhoneNow()) return 0;
+	let areas = 0;
+	for (const el of block.querySelectorAll<HTMLElement>("[data-dock-scroll]")) areas += el.offsetHeight;
+	return Math.max(0, block.offsetHeight - areas);
+}
+
 function DockOverlay({
 	pending,
 	initialQuestionDraft,
@@ -2031,10 +2047,15 @@ function DockOverlay({
 		if (!el) return;
 		const measure = () => {
 			setSbInset(Math.round((el.offsetWidth - el.clientWidth) / 2));
-			setDockMaxH(Math.max(el.clientHeight - 32, 160));
+			setDockMaxH(Math.max(el.clientHeight - 32 - phoneDockChrome(blockRef.current), 160));
 		};
 		measure();
 		window.addEventListener("resize", measure);
+		// The phone cap depends on the dock's own non-scrolling height, which
+		// changes with the variant and as the answer field grows.
+		const block = blockRef.current;
+		const ro = block && isPhoneNow() ? new ResizeObserver(measure) : null;
+		if (block) ro?.observe(block);
 		// Phone (fork: mobile-layout): a soft keyboard in a host that pans
 		// instead of resizing moves only the VISUAL viewport — the shell
 		// follows it (components/phone.ts), so the cap must too.
@@ -2042,6 +2063,7 @@ function DockOverlay({
 		const measureAfterShell = () => requestAnimationFrame(() => requestAnimationFrame(measure));
 		window.visualViewport?.addEventListener("resize", measureAfterShell);
 		return () => {
+			ro?.disconnect();
 			window.removeEventListener("resize", measure);
 			window.visualViewport?.removeEventListener("resize", measureAfterShell);
 		};

@@ -76,6 +76,11 @@ export function computeMenuPlacement(
 	contentHeight: number,
 	preferredSide: MenuSide,
 	align: MenuAlign,
+	/** The menu's rendered width; when given, the menu is kept inside the
+	 *  viewport's EDGE gutters horizontally too (a 22rem menu anchored near
+	 *  a phone's left edge ran off it — the model picker's search field
+	 *  was invisible). Omitted = anchor-aligned only (the old behavior). */
+	menuWidth = 0,
 ): MenuPlacement {
 	const availDown = viewport.height - EDGE - (rect.bottom + GAP);
 	const availUp = rect.top - GAP - EDGE;
@@ -91,8 +96,18 @@ export function computeMenuPlacement(
 	}
 	const avail = side === "down" ? availDown : availUp;
 	const maxHeight = Math.max(MIN_USABLE, Math.min(CAP_VH * viewport.height, avail));
-	const horizontal: Record<string, number> =
+	let horizontal: Record<string, number> =
 		align === "right" ? { right: viewport.width - rect.right } : { left: rect.left };
+	if (menuWidth > 0) {
+		const room = viewport.width - 2 * EDGE;
+		if (menuWidth >= room) {
+			horizontal = { left: EDGE, maxWidth: room };
+		} else {
+			const left = align === "right" ? rect.right - menuWidth : rect.left;
+			const clamped = Math.min(Math.max(left, EDGE), viewport.width - EDGE - menuWidth);
+			if (clamped !== left) horizontal = { left: clamped };
+		}
+	}
 	const vertical: Record<string, number> =
 		side === "down" ? { top: rect.bottom + GAP } : { bottom: viewport.height - rect.top + GAP };
 	return { side, style: { ...horizontal, ...vertical }, maxHeight };
@@ -204,6 +219,7 @@ export function MenuShell({
 				menuRef.current.scrollHeight,
 				preferredSide,
 				align,
+				menuRef.current.offsetWidth,
 			);
 			setPlaced(p);
 		};

@@ -22,7 +22,7 @@ import { useServerEvent, useServerResync } from "@/components/server-events";
 import type { ChatListItem } from "@/src/core";
 import { kbdEventForAction } from "@/src/core";
 import { notifySettingsSaved } from "@/components/settings-signal";
-import { useIsPhone, useVisualViewportVars } from "@/components/phone";
+import { useIsPhone, useShellBackBridge, useVisualViewportVars } from "@/components/phone";
 import { BottomNav } from "@/components/bottom-nav";
 
 /**
@@ -111,6 +111,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 	// and the desktop layout gets it back the moment the gate lifts.
 	const phone = useIsPhone();
 	useVisualViewportVars(phone);
+	useShellBackBridge();
 
 	useEffect(() => {
 		// Electron shell detection (merged chrome, 2026-09-17): keys the

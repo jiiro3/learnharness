@@ -36,6 +36,7 @@ import {
 	KEYBOARD_ACTIONS,
 } from "@/src/core";
 import { isDictationActive } from "@/components/dictation";
+import { isShellBack } from "@/components/phone";
 import { useSettingsDialog } from "@/components/settings/settings-dialog.tsx";
 
 // Re-exported for the contract pin (tests/keyboard-toggle-sidebar.test.ts):
@@ -83,6 +84,9 @@ export function KeyboardShortcuts() {
 					e.preventDefault();
 					return;
 				}
+				// The Android Back bridge (components/phone.ts): Back closes
+				// surfaced layers only — never the dictation/abort fallback.
+				if (isShellBack(e)) return;
 				// THE ONE-ESC LAW (owner, keyboard round 2026-10-06): one
 				// Esc, one action, on the topmost active layer. Field-level
 				// handlers claim at their element (focus in a field: the
