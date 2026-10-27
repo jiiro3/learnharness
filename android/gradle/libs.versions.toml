@@ -1,0 +1,28 @@
+# Every version the Android shell builds with. AGP, Kotlin and the SDK levels match oxygen.
+
+[versions]
+agp = "8.13.0"
+kotlin = "2.4.20"
+compileSdk = "36"
+targetSdk = "36"
+minSdk = "34"
+activity = "1.13.0"
+coreKtx = "1.18.0"
+webkit = "1.17.0"
+browser = "1.10.0"
+swiperefreshlayout = "1.2.0"
+datastore = "1.1.7"
+junit = "4.13.2"
+
+[libraries]
+androidx-activity-ktx = { module = "androidx.activity:activity-ktx", version.ref = "activity" }
+androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
+androidx-webkit = { module = "androidx.webkit:webkit", version.ref = "webkit" }
+androidx-browser = { module = "androidx.browser:browser", version.ref = "browser" }
+androidx-swiperefreshlayout = { module = "androidx.swiperefreshlayout:swiperefreshlayout", version.ref = "swiperefreshlayout" }
+androidx-datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastore" }
+junit = { module = "junit:junit", version.ref = "junit" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }

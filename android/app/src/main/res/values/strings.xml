@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">LearnHarness</string>
+    <string name="server_settings">Server settings</string>
+    <string name="server_settings_short">Server</string>
+    <string name="setup_title">Connect to LearnHarness</string>
+    <string name="setup_body">Enter the address of your LearnHarness server, for example https://desktop.tailnet.ts.net. You can change this later by long-pressing the app icon.</string>
+    <string name="setup_url_label">Server URL</string>
+    <string name="setup_url_hint">https://host.tailnet.ts.net</string>
+    <string name="setup_token_label">Access token (optional)</string>
+    <string name="setup_token_hint">Leave empty if the server has no token</string>
+    <string name="setup_save">Connect</string>
+    <string name="setup_cancel">Cancel</string>
+    <string name="setup_invalid_url">Enter an http:// or https:// address with a host name.</string>
+    <string name="setup_cleartext">Use https://. Plain http:// only works for *.ts.net tailnet names.</string>
+    <string name="setup_invalid_token">The token can\'t contain spaces, quotes, commas, semicolons or backslashes.</string>
+    <string name="error_title">Can\'t reach LearnHarness</string>
+    <string name="error_retry">Retry</string>
+    <string name="error_offline">This phone is offline. Connect to a network and retry.</string>
+    <string name="error_unreachable">%1$s didn\'t respond. Check that the server is running and that Tailscale is connected on this phone.\n\n%2$s</string>
+    <string name="error_tls">The server\'s certificate isn\'t trusted (%1$s).</string>
+    <string name="error_auth">The server refused access (HTTP %1$d). Check the access token in Server settings.</string>
+    <string name="error_crashed">The page stopped unexpectedly.</string>
+    <string name="download_started">Downloading %1$s</string>
+    <string name="download_saved">Saved %1$s to Downloads</string>
+    <string name="download_failed">Couldn\'t save the download</string>
+    <string name="download_unsupported">This download isn\'t supported in the app</string>
+    <string name="mic_denied">Microphone permission is off, so dictation can\'t start</string>
+    <string name="no_app_for_link">No app can open this link</string>
+</resources>

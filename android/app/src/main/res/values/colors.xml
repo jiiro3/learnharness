@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The web app's background color; the WebView shows it before the page paints. -->
+    <color name="lh_web_background">#141414</color>
+    <color name="lh_icon_background">#141414</color>
+    <color name="lh_icon_ring">#949494</color>
+    <color name="lh_background">#FFFFFF</color>
+    <color name="lh_on_background">#141414</color>
+    <color name="lh_secondary">#5C5C5C</color>
+    <color name="lh_accent">#141414</color>
+</resources>

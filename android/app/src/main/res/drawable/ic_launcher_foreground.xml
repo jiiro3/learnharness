@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The LearnHarness mark from build/icon.png, redrawn on its 512 px grid and scaled into the
+     adaptive icon's safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="0.135"
+        android:scaleY="0.135"
+        android:translateX="19.44"
+        android:translateY="19.44">
+        <!-- Orbit, open where it meets the hollow ring. -->
+        <path
+            android:pathData="M405.25,218.05 A154,154 0 1,1 292.56,106.40"
+            android:strokeWidth="21"
+            android:strokeColor="@color/lh_icon_ring" />
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M55,363 a93,93 0 1,0 186,0 a93,93 0 1,0 -186,0 Z" />
+        <path
+            android:pathData="M281.5,148 a81.5,81.5 0 1,0 163,0 a81.5,81.5 0 1,0 -163,0 Z"
+            android:strokeWidth="23"
+            android:strokeColor="#FFFFFF" />
+    </group>
+</vector>

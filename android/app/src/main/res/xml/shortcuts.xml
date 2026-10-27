@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Long-press the launcher icon to change the server URL or token. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_settings"
+        android:shortcutId="server_settings"
+        android:shortcutLongLabel="@string/server_settings"
+        android:shortcutShortLabel="@string/server_settings_short">
+        <intent
+            android:action="com.jiiro.learnharness.action.SERVER_SETTINGS"
+            android:targetClass="com.jiiro.learnharness.MainActivity"
+            android:targetPackage="com.jiiro.learnharness" />
+    </shortcut>
+</shortcuts>

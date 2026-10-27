@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="lh_background">#141414</color>
+    <color name="lh_on_background">#F2F2F2</color>
+    <color name="lh_secondary">#A3A3A3</color>
+    <color name="lh_accent">#F2F2F2</color>
+</resources>
