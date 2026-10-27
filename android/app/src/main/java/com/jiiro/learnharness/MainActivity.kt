@@ -75,8 +75,11 @@ class MainActivity : ComponentActivity() {
     private var failedUrl: String? = null
     private var safeInsets = Insets.NONE
 
-    /** Set per touch by WebScripts.canPullToRefresh; false until the page answers. */
-    private var pullAllowed = false
+    /** Whether the current touch may pull to refresh, from WebScripts.PULL_GUARD; null until it answers. */
+    private var pullAnswer: Boolean? = null
+
+    /** True while a touch-down is dispatched, so SwipeRefreshLayout can record where it started. */
+    private var touchStarting = false
 
     private var pendingPermission: PermissionRequest? = null
     private var pendingFiles: ValueCallback<Array<Uri>>? = null
@@ -124,7 +127,16 @@ class MainActivity : ComponentActivity() {
         setUpInsets()
         setUpBack()
         swipe.setColorSchemeColors(getColor(R.color.lh_web_background))
-        swipe.setOnChildScrollUpCallback { _, _ -> webView.let { it == null || it.scrollY > 0 || !pullAllowed } }
+        // "Child can scroll up" blocks the pull. On the down event it must be false or the layout never
+        // records the gesture's start; after that the page's answer for this touch decides.
+        swipe.setOnChildScrollUpCallback { _, _ ->
+            val web = webView
+            when {
+                web == null -> true
+                touchStarting -> false
+                else -> web.scrollY > 0 || pullAnswer != true
+            }
+        }
         swipe.setOnRefreshListener { retry() }
         findViewById<Button>(R.id.error_retry).setOnClickListener { retry() }
         findViewById<Button>(R.id.error_settings).setOnClickListener { showSetup(config) }
@@ -143,6 +155,17 @@ class MainActivity : ComponentActivity() {
                 openServer(saved, webState)
                 if (savedInstanceState == null && intent?.action == ACTION_SERVER_SETTINGS) showSetup(saved)
             }
+        }
+    }
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked != MotionEvent.ACTION_DOWN) return super.dispatchTouchEvent(event)
+        pullAnswer = null
+        touchStarting = true
+        try {
+            return super.dispatchTouchEvent(event)
+        } finally {
+            touchStarting = false
         }
     }
 
@@ -188,7 +211,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    @SuppressLint("SetJavaScriptEnabled", "ClickableViewAccessibility")
+    @SuppressLint("SetJavaScriptEnabled")
     private fun createWebView(cfg: ServerConfig): WebView {
         val web = WebView(this)
         web.setBackgroundColor(getColor(R.color.lh_web_background))
@@ -208,8 +231,10 @@ class MainActivity : ComponentActivity() {
         web.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
             downloads?.start(url, userAgent, contentDisposition, mimeType)
         }
-        // Blob exports: an origin-scoped message channel, not addJavascriptInterface.
-        // Without these features blob exports fall through to the DownloadListener's toast.
+        // Blob exports and the pull-to-refresh guard: origin-scoped message channels, not
+        // addJavascriptInterface. Without them blob exports fall through to the DownloadListener's
+        // toast and pull-to-refresh is off (Retry on the error screen still reloads).
+        var bridged = false
         if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
             if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
                 val rules = setOf(cfg.origin)
@@ -217,18 +242,14 @@ class MainActivity : ComponentActivity() {
                     if (isMainFrame) message.data?.let { downloads?.saveBlob(it) }
                 }
                 WebViewCompat.addDocumentStartJavaScript(web, WebScripts.BLOB_DOWNLOADS, rules)
-            }
-        }
-        web.setOnTouchListener { _, event ->
-            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-                pullAllowed = false
-                val density = resources.displayMetrics.density
-                web.evaluateJavascript(WebScripts.canPullToRefresh(event.x / density, event.y / density)) {
-                    pullAllowed = it == "true"
+                WebViewCompat.addWebMessageListener(web, WebScripts.PULL_BRIDGE, rules) { _, message, _, isMainFrame, _ ->
+                    if (isMainFrame) pullAnswer = message.data == "1"
                 }
+                WebViewCompat.addDocumentStartJavaScript(web, WebScripts.PULL_GUARD, rules)
+                bridged = true
             }
-            false
         }
+        swipe.isEnabled = bridged
         return web
     }
 
