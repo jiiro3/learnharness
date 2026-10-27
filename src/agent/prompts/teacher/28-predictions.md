@@ -14,6 +14,7 @@ Every teaching unit is a **predict → teach → check** cycle, and the two ques
 
 - Posed AFTER the step's teaching is complete. The question principles define what it must be: answerable by reasoning from the session, application over recitation, a miss that names the wrong model.
 - Its verdict is your continuation data: continue, repair, or reclarify. A miss means the step didn't land — diagnose and repair before building anything on top.
+- When his check returns, your reply OPENS with written feedback on it, before any next question: right — one plain line on what it shows, no praise; wrong or partial — what his answer assumed, why it fails, and the repair. A bare next question after an answer is a failed turn.
 
 ## The cycle
 

@@ -1,12 +1,16 @@
 "use client";
 
 import { ChevronRight } from "lucide-react";
+import { toolDoneLabel } from "@/src/core";
 import type { ArtifactPartProps } from "@/src/core";
 
 /**
  * The generic tool-call card (sources v1, 2026-09-19): a quiet, collapsed
- * one-liner per synchronous tool call — the tool name plus the headline
- * argument — expandable to the full input and output. The user's spec:
+ * one-liner per synchronous tool call — a human label for what the call
+ * did plus the headline argument — expandable to the full input and
+ * output. The raw tool name never renders (teacher-feedback, 2026-10-26:
+ * "LIST_SESSIONS" in the chat was an internal leaking); it stays on the
+ * data-tool attribute only. The user's spec:
  * "at least the tool name; for read, the file name; everything collapsed
  * by default; not distracting — background stuff." Unregistered tools
  * still render nothing (chat.tsx's registry default); this card is only
@@ -33,12 +37,8 @@ function headlineArg(tool: string, input: unknown): string {
 		return p;
 	}
 	if (typeof inp.pattern === "string") return inp.pattern;
-	// list_propositions: the session id is the call's subject — the
-	// collapsed line reads "list_propositions chat_…". Shown as given
-	// (the id is exactly what list_sessions reported to the model).
-	if (tool === "list_propositions" && typeof inp.session === "string" && inp.session.length > 0) {
-		return inp.session;
-	}
+	// list_propositions' session id is an internal (chat_…): it stays in
+	// the expanded input, never the collapsed line.
 	return "";
 }
 
@@ -74,8 +74,8 @@ export function ToolCallCard({ part }: ArtifactPartProps) {
 			className="group my-1 w-full max-w-2xl select-none"
 		>
 			<summary className="flex cursor-pointer list-none items-center gap-2 text-xs text-muted-foreground [&::-webkit-details-marker]:hidden">
-				<span className={`font-medium uppercase tracking-wide ${failed ? "text-red-500" : ""}`}>
-					{tool}
+				<span className={`font-medium ${failed ? "text-red-500" : ""}`}>
+					{toolDoneLabel(tool)}
 				</span>
 				{arg && <span className="truncate">{arg}</span>}
 				<ChevronRight className="size-3 shrink-0 opacity-50 transition-transform group-open:rotate-90" />

@@ -25,7 +25,7 @@ export const sendToUserTool: AgentTool<typeof sendToUserInput> = {
 		"Ordinary response text may be converted into summarized thinking instead of reaching the learner. " +
 		"**Never rely on ordinary response text to communicate with the learner. Thinking is not delivery.**\n\n" +
 		"Put the complete message in `message`. Markdown and LaTeX are supported. " +
-		"Do not duplicate it in ordinary response text.\n\n" +
+		"Do not duplicate it in ordinary response text, and never mention this tool or narrate its use (\"I've sent…\").\n\n" +
 		"Question content still belongs in the appropriate question tool; send any accompanying teaching or " +
 		"commentary through `send_to_user` before calling that tool.\n\n" +
 		"This tool does not pause or end your turn. Continue with other tools when needed. " +

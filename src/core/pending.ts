@@ -148,7 +148,26 @@ const ACTIVITY_LABELS: Record<string, string> = {
 	pdf: "Reading a PDF…",
 	plan_init: "Drawing up the plan…",
 	probe_done: "Concluding the assessment…",
+	list_sessions: "Looking up past sessions…",
+	list_propositions: "Looking up a past session…",
 };
+
+/** The SETTLED label for a quiet tool-call card (teacher-feedback,
+ *  2026-10-26): what the call did, in the learner's words — raw tool
+ *  names (LIST_SESSIONS) are internals and never render in the
+ *  transcript. Unknown tools fall back to a generic line. */
+const DONE_LABELS: Record<string, string> = {
+	read: "Read a file",
+	ls: "Listed a directory",
+	find: "Found files",
+	grep: "Searched file contents",
+	list_sessions: "Looked up past sessions",
+	list_propositions: "Looked up a past session",
+};
+
+export function toolDoneLabel(tool: string): string {
+	return DONE_LABELS[tool] ?? "Used a tool";
+}
 
 /** The activity label for ONE running tool (owner, streaming round
  *  2026-10-01): the live tool-input card carries it inline — spinner +
