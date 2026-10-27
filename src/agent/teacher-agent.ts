@@ -17,6 +17,7 @@ import {
 import { practiceTools, type PracticeToolContext } from "./tools/practice.ts";
 import { healToolRecord, withArgumentHeal } from "./tools/heal.ts";
 import { sendToUserTool } from "./tools/send-to-user.ts";
+import { feedbackGuard } from "./feedback-guard.ts";
 import { quizInputObject, quizInputProblems } from "../core/question-core.ts";
 import { QUESTION_TOOLS, type EnabledTools } from "../core/pending.ts";
 import { toLlmMessages, nativeInputCause, PRACTICE_PROBLEM_TOOL } from "../core/native-messages.ts";
@@ -216,6 +217,11 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 		// Wave C registerLiveAgent-before-runPiTurn design depends on.
 		// undefined preserves normal scheduling (the old boolean false).
 		finishTurn: (turn) => (stopper(turn) ? { action: "end" } : undefined),
+		// The feedback guard (teacher-feedback, 2026-10-26): a teacher
+		// question after a graded answer needs a visible reply first;
+		// otherwise the call errors back and the model retries
+		// (feedback-guard.ts). Teacher only.
+		...(kind === "teacher" ? { beforeToolCall: feedbackGuard } : {}),
 		// Wave C (2026-09-26, owner correction same day): markers handed to a
 		// live run drain from pi's STEERING queue — the lesson loop is one
 		// continuous teach→quiz→teach run, so delivery must inject at turn

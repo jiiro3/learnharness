@@ -1480,6 +1480,25 @@ describe("prompt composition", () => {
 		assert.ok(!prober.includes("predict → teach → check"), "the teaching cycle stays out of the prober");
 	});
 
+	it("visible delivery composes into every agent; check feedback is teacher doctrine (QA 2026-10-26)", () => {
+		const teacher = composeInstructions("teacher");
+		const prober = composeInstructions("prober");
+		const practice = composeInstructions("practice");
+		for (const [name, prompt] of [
+			["teacher", teacher],
+			["prober", prober],
+			["practice", practice],
+		] as const) {
+			assert.ok(prompt.includes("## Only what you write reaches him"), `${name} carries the visible-delivery rule`);
+			assert.ok(prompt.includes("never only in your reasoning"), `${name}: nothing meant for him lives only in reasoning`);
+			assert.ok(prompt.includes("Never narrate the mechanics"), `${name}: no tool-mechanics narration`);
+			assert.ok(prompt.includes("Say each thing once"), `${name}: no repeated questions`);
+		}
+		assert.ok(teacher.includes("When his check returns, your reply OPENS with written feedback on it"), "the teacher answers every check in prose");
+		assert.ok(!prober.includes("When his check returns"), "check feedback stays teach-phase doctrine");
+		assert.ok(practice.includes("Every verdict, hint, and answer to his question is written in your reply's text"), "practice writes its verdicts");
+	});
+
 	it("the sources-v0 prompt lines compose: read/pdf doctrine in the teacher, the read line in the prober", () => {
 		const teacher = composeInstructions("teacher");
 		assert.ok(teacher.includes("Learner source files"), "the teacher carries the source-files section");
