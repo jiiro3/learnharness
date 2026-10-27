@@ -522,14 +522,28 @@ export function AgentSection({
 				>
 					{/* Graying ruling: ONLY the toggle dims without an
 					    override file — the file name above stays
-					    full-contrast (the whole-row dim is dead). */}
-					<span className={fileExists ? undefined : "opacity-40"}>
-						<Toggle
-							checked={info.enabled}
-							disabled={!fileExists}
-							label={`prompt ${info.path}`}
-							onChange={(on) => onSectionChange(composePromptSwitch(agent, info.path, on))}
-						/>
+					    full-contrast (the whole-row dim is dead). The
+					    On/Off word beside it (legibility fix 2026-10-26)
+					    never dims: the switch's state reads at a glance
+					    even while the switch itself is locked. */}
+					<span className="flex shrink-0 items-center gap-2">
+						<span
+							data-testid={`prompt-state-${info.path}`}
+							className={cn(
+								"text-xs uppercase tracking-wide",
+								info.enabled ? "text-foreground" : "text-muted-foreground",
+							)}
+						>
+							{info.enabled ? "On" : "Off"}
+						</span>
+						<span className={fileExists ? undefined : "opacity-40"}>
+							<Toggle
+								checked={info.enabled}
+								disabled={!fileExists}
+								label={`prompt ${info.path}`}
+								onChange={(on) => onSectionChange(composePromptSwitch(agent, info.path, on))}
+							/>
+						</span>
 					</span>
 				</SettingsRow>
 				<button

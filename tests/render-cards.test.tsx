@@ -78,6 +78,37 @@ function renderDock(props: {
 	);
 }
 
+describe("the confidence slider starts UNSET (2026-10-26)", () => {
+	const tag = (html: string, testid: string) => {
+		const i = html.indexOf(`data-testid="${testid}"`);
+		assert.ok(i >= 0, `missing ${testid}`);
+		return html.slice(html.lastIndexOf("<", i), html.indexOf(">", i) + 1);
+	};
+
+	it("a fresh quiz dock: no disc, a bare rail, and a 'not set' label instead of 50%", () => {
+		const html = renderDock({ toolName: "quiz", toolCallId: "q1", input: quizInput as never });
+		const slider = tag(html, "confidence-slider");
+		assert.match(slider, /data-unset=""/);
+		assert.match(slider, /aria-valuetext="not set"/);
+		assert.match(slider, /\[&amp;::-webkit-slider-thumb\]:opacity-0/, "the disc is hidden");
+		assert.match(tag(html, "confidence-rail"), /linear-gradient\(90deg, transparent 0%, transparent 0%/, "no fill");
+		assert.match(html, /data-testid="confidence-value"[^>]*>not set</);
+		assert.ok(!/data-testid="confidence-value"[^>]*>50%</.test(html), "never a phantom 50%");
+	});
+
+	it("a SET confidence renders as before: the disc, the fill, the percent", () => {
+		const html = renderToStaticMarkup(
+			<QuestionDock toolName="quiz" toolCallId="q1" input={quizInput} expanded onExpand={() => {}} onSubmit={() => {}}
+				initialDraft={{ selection: { selected: new Set([1]), otherSelected: false, dontKnow: false }, thinking: "", other: "", text: "", confidenceIndex: 2 }} />,
+		);
+		const slider = tag(html, "confidence-slider");
+		assert.ok(!slider.includes("data-unset"));
+		assert.ok(!slider.includes("slider-thumb]:opacity-0"));
+		assert.match(slider, /aria-valuetext="50 percent"/);
+		assert.match(html, /data-testid="confidence-value"[^>]*>50%</);
+	});
+});
+
 describe("question submission draft restoration", () => {
 	const draft = {
 		selection: { selected: new Set([0]), otherSelected: true, dontKnow: false },
@@ -92,6 +123,11 @@ describe("question submission draft restoration", () => {
 		assert.match(html, /role="radio" aria-checked="true" data-kbdrow="0"/);
 		assert.ok(html.includes("preserved reasoning"));
 		assert.ok(html.includes("90%"));
+	});
+
+	it("restores an UNSET confidence as unset (null index)", () => {
+		const html = renderToStaticMarkup(<QuestionDock toolName="quiz" toolCallId="q1" input={quizInput} expanded onExpand={() => {}} onSubmit={() => {}} initialDraft={{ ...draft, confidenceIndex: null }} />);
+		assert.match(html, /data-testid="confidence-value"[^>]*>not set</);
 	});
 
 	it("restores an ask's custom answer and a free-text answer", () => {
@@ -287,6 +323,20 @@ describe("render smoke tests", () => {
 		assert.match(html, /70%/);
 		// It is a RECORD, not a control — no range input on the card.
 		assert.ok(!html.includes('type="range"'));
+	});
+
+	it("AnsweredCard shows an untouched slider as NOT SET (bare rail, no percent)", () => {
+		const answer = buildAnswer(quizQD(), { values: ["Venus"] });
+		assert.ok(!("confidence" in answer));
+		const html = renderToStaticMarkup(<AnsweredCard answer={answer} />);
+		const i = html.indexOf('data-testid="answered-confidence"');
+		assert.ok(i >= 0, "the confidence row renders");
+		const row = html.slice(i, html.indexOf("</div></div>", i));
+		assert.match(html.slice(html.lastIndexOf("<", i), html.indexOf(">", i)), /data-unset/);
+		assert.match(row, /not set/);
+		assert.ok(!/\d+%<\/span>/.test(row), "no percent read-out");
+		// The rail is bare: the fill layer is transparent.
+		assert.match(row, /linear-gradient\(90deg, transparent 0%, transparent 0%/);
 	});
 
 	it("AnsweredCard hides the rail where no confidence exists (IDK, older records)", () => {
