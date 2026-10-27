@@ -56,6 +56,12 @@ object WebScripts {
     """.trimIndent()
 
     /**
+     * System Back: asks the page to close its topmost overlay (the web app's window.__lhBack,
+     * components/phone.ts). Evaluates to true if the page handled it; false on a server without it.
+     */
+    const val BACK = "(function(){try{return typeof window.__lhBack==='function'&&window.__lhBack()===true;}catch(e){return false;}})()"
+
+    /**
      * Fallback for CSS env(safe-area-inset-*): the same insets, in CSS px, as custom properties
      * `--lh-safe-area-inset-{top,right,bottom,left}` on `<html>`'s inline style, which the phone
      * layout combines as `max(env(safe-area-inset-top), var(--lh-safe-area-inset-top, 0px))`.

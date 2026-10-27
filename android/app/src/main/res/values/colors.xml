@@ -13,4 +13,6 @@
     <color name="lh_on_background">#141414</color>
     <color name="lh_secondary">#5C5C5C</color>
     <color name="lh_accent">#141414</color>
+    <!-- Placeholder text: dimmer than typed text, so a hint never reads as a saved value. -->
+    <color name="lh_hint">#9E9E9E</color>
 </resources>

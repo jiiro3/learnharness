@@ -18,9 +18,9 @@
     <string name="setup_title">Connect to LearnHarness</string>
     <string name="setup_body">Enter the address of your LearnHarness server, for example http://learnharness.oxy.internal:3000. You can change this later by long-pressing the app icon.</string>
     <string name="setup_url_label">Server URL</string>
-    <string name="setup_url_hint">http://learnharness.oxy.internal:3000</string>
+    <string name="setup_url_hint">e.g. https://your-server</string>
     <string name="setup_token_label">Access token (optional)</string>
-    <string name="setup_token_hint">Leave empty if the server has no token</string>
+    <string name="setup_token_hint">Empty if the server has none</string>
     <string name="setup_save">Connect</string>
     <string name="setup_cancel">Cancel</string>
     <string name="setup_invalid_url">Enter an http:// or https:// address with a host name.</string>
@@ -33,6 +33,8 @@
     <string name="error_tls">The server\'s certificate isn\'t trusted (%1$s).</string>
     <string name="error_auth_title">Access token rejected</string>
     <string name="error_auth">The server refused the access token (HTTP %1$d). Check or replace it in Server settings.</string>
+    <string name="error_no_token_title">Access token needed</string>
+    <string name="error_no_token">This server needs an access token, and none is entered (HTTP %1$d). Add it in Server settings.</string>
     <string name="error_server_status">%1$s still wasn\'t ready after 30 seconds of retries (last answer: HTTP %2$d).</string>
     <string name="waking">Waking up the server…</string>
     <string name="error_crashed">The page stopped unexpectedly.</string>

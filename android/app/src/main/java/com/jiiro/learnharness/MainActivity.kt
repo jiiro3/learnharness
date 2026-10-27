@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Bitmap
+import android.graphics.Typeface
 import android.net.ConnectivityManager
 import android.net.Uri
 import android.net.http.SslError
@@ -128,6 +129,8 @@ class MainActivity : ComponentActivity() {
         urlInput = findViewById(R.id.setup_url)
         tokenInput = findViewById(R.id.setup_token)
         cancelButton = findViewById(R.id.setup_cancel)
+        // A password field defaults to monospace, so its hint looked unlike the URL field's.
+        tokenInput.typeface = Typeface.DEFAULT
 
         setUpInsets()
         setUpBack()
@@ -421,7 +424,11 @@ class MainActivity : ComponentActivity() {
                 WakeRetry.isAuthStatus(status) -> {
                     failedUrl = url
                     loadFailed = true
-                    showError(getString(R.string.error_auth, status), getString(R.string.error_auth_title))
+                    if (config?.token == null) {
+                        showError(getString(R.string.error_no_token, status), getString(R.string.error_no_token_title))
+                    } else {
+                        showError(getString(R.string.error_auth, status), getString(R.string.error_auth_title))
+                    }
                 }
                 WakeRetry.isWakingStatus(status) ->
                     wakeOrFail(url) { getString(R.string.error_server_status, request.url.host ?: url, status) }
@@ -592,24 +599,38 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun setUpBack() {
-        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
-            override fun handleOnBackPressed() {
-                val web = webView
-                when {
-                    setupPanel.isVisible && config != null -> hideSetup()
-                    web != null && web.canGoBack() -> {
-                        errorPanel.isVisible = false
-                        updateBarAppearance()
-                        web.goBack()
+        onBackPressedDispatcher.addCallback(this, backCallback)
+    }
+
+    private val backCallback = object : OnBackPressedCallback(true) {
+        override fun handleOnBackPressed() {
+            val web = webView
+            val cfg = config
+            when {
+                setupPanel.isVisible && cfg != null -> hideSetup()
+                // The page first closes its own top overlay (sheet, settings, menu); only when it
+                // has none does Back move through history or leave the app.
+                web != null && cfg != null && !errorPanel.isVisible && !wakingPanel.isVisible &&
+                    web.url?.let { ServerUrls.sameOrigin(it, cfg.origin) } == true ->
+                    web.evaluateJavascript(WebScripts.BACK) { handled ->
+                        if (handled != "true" && web == webView) navigateBack(web)
                     }
-                    else -> {
-                        isEnabled = false
-                        onBackPressedDispatcher.onBackPressed()
-                        isEnabled = true
-                    }
-                }
+                else -> navigateBack(web)
             }
-        })
+        }
+    }
+
+    /** Back with nothing left to close in the page: WebView history, then leave the app. */
+    private fun navigateBack(web: WebView?) {
+        if (web != null && web.canGoBack()) {
+            errorPanel.isVisible = false
+            updateBarAppearance()
+            web.goBack()
+        } else {
+            backCallback.isEnabled = false
+            onBackPressedDispatcher.onBackPressed()
+            backCallback.isEnabled = true
+        }
     }
 
     private fun toast(text: String) = Toast.makeText(this, text, Toast.LENGTH_SHORT).show()
