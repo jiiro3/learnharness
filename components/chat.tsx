@@ -1413,7 +1413,13 @@ export function Chat({
 					{/* Practice (owner, 2026-10-04): the coverage ring hides —
 				    practice never extracts, so an ever-filling ring with no
 				    run behind it would lie. */}
-					{kind !== "practice" && <CoverageRing chatId={chatId} refreshKey={coverageTick} />}
+					{kind !== "practice" && (
+						// Phone: a 44px hit area around the 20px ring (padding
+						// keeps the glyph's size).
+						<span className="contents phone:[&_[data-testid=coverage-ring]]:size-11 phone:[&_[data-testid=coverage-ring]]:p-3">
+							<CoverageRing chatId={chatId} refreshKey={coverageTick} />
+						</span>
+					)}
 					{/* Practice sessions: no phase arc — a quiet Practice tag
 					    instead of the phase chip. */}
 					{kind === "practice" ? (

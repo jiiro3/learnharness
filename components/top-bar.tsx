@@ -42,6 +42,15 @@ import type { ReactNode } from "react";
 import { SidebarToggle } from "@/components/sidebar";
 import { PhoneBackButton } from "@/components/bottom-nav";
 
+/** Phone (fork: mobile-layout): a full-screen session's bar folds away
+ *  while the soft keyboard is up on a LOW viewport (a phone in landscape)
+ *  — its 56px would otherwise push the question under the bar. */
+const PHONE_KB_COLLAPSE = "phone:[@media(max-height:500px)]:[.lh-kb-open_&]:hidden";
+// Phone header geometry (fork: mobile-layout): the bar grows in height
+// with a large font scale instead of clipping, and never scrolls sideways
+// (the title truncates; overflow-x clip is the net, and still lets the
+// coverage popover hang below the bar).
+
 export function TopBar({
 	drag = true,
 	phoneBack = false,
@@ -58,7 +67,7 @@ export function TopBar({
 	return (
 		<header
 			onMouseDown={onMouseDown}
-			className={`${drag ? "lh-drag " : ""}lh-wco-gutter flex h-15 select-none items-center gap-3 border-b border-border px-3 phone:h-14 phone:gap-2 phone:px-2`}
+			className={`${drag ? "lh-drag " : ""}lh-wco-gutter flex h-15 select-none items-center gap-3 border-b border-border px-3 phone:h-auto phone:min-h-14 phone:min-w-0 phone:gap-2 phone:overflow-x-clip phone:pl-2 phone:pr-3${phoneBack ? ` ${PHONE_KB_COLLAPSE}` : ""}`}
 		>
 			{phoneBack && <PhoneBackButton />}
 			<SidebarToggle />
