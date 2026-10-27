@@ -1,11 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- HTTPS everywhere, except plain HTTP to tailnet MagicDNS names (WireGuard already
-     encrypts that traffic) and to localhost for emulator testing. -->
-<network-security-config>
-    <base-config cleartextTrafficPermitted="false" />
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="true">ts.net</domain>
-        <domain includeSubdomains="false">localhost</domain>
-        <domain includeSubdomains="false">10.0.2.2</domain>
-    </domain-config>
+<!-- Plain HTTP is allowed only to tailnet hosts, where WireGuard already encrypts the traffic:
+     *.oxy.internal (Headscale MagicDNS), *.ts.net, Headscale/Tailscale IPs in 100.64.0.0/10,
+     and localhost for emulator testing. This file can't express an IP range, so the base config
+     permits cleartext and ServerUrls.cleartextAllowed enforces the list in code: on the setup
+     screen, on every WebView request (MainActivity.ShellClient.shouldInterceptRequest) and on
+     downloads. -->
+<network-security-config xmlns:tools="http://schemas.android.com/tools">
+    <base-config
+        cleartextTrafficPermitted="true"
+        tools:ignore="InsecureBaseConfiguration" />
 </network-security-config>

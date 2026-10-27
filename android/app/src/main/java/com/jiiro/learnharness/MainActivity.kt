@@ -49,6 +49,7 @@ import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import kotlinx.coroutines.launch
+import java.io.ByteArrayInputStream
 import kotlin.math.max
 
 /**
@@ -338,6 +339,12 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        /** Enforces the cleartext rule the network security config can't express (IP ranges). */
+        override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+            if (ServerUrls.cleartextAllowed(request.url.toString())) return null
+            return WebResourceResponse("text/plain", "utf-8", 403, "Cleartext blocked", emptyMap(), ByteArrayInputStream(ByteArray(0)))
+        }
+
         override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
             if (view == webView) failedUrl = null
         }
@@ -390,6 +397,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private inner class ShellChromeClient : WebChromeClient() {
+        // On an http origin the page isn't a secure context, so navigator.mediaDevices is missing
+        // and the web app shows its own dictation error; no request reaches this method.
         override fun onPermissionRequest(request: PermissionRequest) {
             val cfg = config
             val wantsMic = PermissionRequest.RESOURCE_AUDIO_CAPTURE in request.resources

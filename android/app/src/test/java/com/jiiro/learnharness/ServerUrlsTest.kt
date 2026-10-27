@@ -46,8 +46,29 @@ class ServerUrlsTest {
         assertTrue(ServerUrls.cleartextAllowed("http://desk.tail1234.ts.net:3000"))
         assertTrue(ServerUrls.cleartextAllowed("http://localhost:3000"))
         assertFalse(ServerUrls.cleartextAllowed("http://example.com"))
-        assertFalse(ServerUrls.cleartextAllowed("http://100.101.102.103:3000"))
+        assertFalse(ServerUrls.cleartextAllowed("http://192.168.1.5:3000"))
         assertFalse(ServerUrls.cleartextAllowed("http://evilts.net"))
+    }
+
+    @Test fun cleartextForHeadscaleTailnet() {
+        assertTrue(ServerUrls.cleartextAllowed("http://learnharness.oxy.internal:3000"))
+        assertTrue(ServerUrls.cleartextAllowed("http://oxy.internal"))
+        assertTrue(ServerUrls.cleartextAllowed("http://100.64.0.1:3000"))
+        assertTrue(ServerUrls.cleartextAllowed("http://100.127.255.254"))
+        assertFalse(ServerUrls.cleartextAllowed("http://100.63.255.255"))
+        assertFalse(ServerUrls.cleartextAllowed("http://100.128.0.1"))
+        assertFalse(ServerUrls.cleartextAllowed("http://100.64.0.256"))
+        assertFalse(ServerUrls.cleartextAllowed("http://100.64.1"))
+        assertFalse(ServerUrls.cleartextAllowed("http://100.64.0.1.example.com"))
+        assertFalse(ServerUrls.cleartextAllowed("http://evil-oxy.internal"))
+        assertFalse(ServerUrls.cleartextAllowed("http://oxy.internal.example.com"))
+    }
+
+    @Test fun httpOriginCookieIsNotSecure() {
+        val config = ServerConfig(requireNotNull(ServerUrls.normalize("http://learnharness.oxy.internal:3000")), "t0k")
+        assertEquals("http://learnharness.oxy.internal:3000", config.origin)
+        assertFalse(config.isHttps)
+        assertEquals("lh_token=t0k; Path=/; HttpOnly; SameSite=Lax", ServerUrls.tokenCookie("t0k", config.isHttps))
     }
 
     @Test fun tokenCookie() {

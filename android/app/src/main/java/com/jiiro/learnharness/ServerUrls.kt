@@ -42,12 +42,28 @@ object ServerUrls {
 
     fun sameOrigin(url: String, origin: String): Boolean = origin(url)?.let { it == origin } ?: false
 
-    /** Mirrors res/xml/network_security_config.xml: http only to tailnet names and localhost. */
+    /**
+     * True unless [url] is plain http to a host outside the tailnet (see
+     * res/xml/network_security_config.xml): http is allowed only to *.oxy.internal (Headscale
+     * MagicDNS), *.ts.net, 100.64.0.0/10 addresses, and localhost / the emulator's host alias.
+     */
     fun cleartextAllowed(url: String): Boolean {
         val uri = parse(url) ?: return false
         if (uri.scheme?.lowercase() != "http") return true
         val host = uri.host?.lowercase() ?: return false
-        return host.endsWith(".ts.net") || host == "localhost" || host == "10.0.2.2"
+        return host == "oxy.internal" || host.endsWith(".oxy.internal") || host.endsWith(".ts.net") ||
+            host == "localhost" || host == "10.0.2.2" || isTailnetIpv4(host)
+    }
+
+    /** A dotted-quad IPv4 literal in 100.64.0.0/10 (the CGNAT range Headscale and Tailscale use). */
+    fun isTailnetIpv4(host: String): Boolean {
+        val parts = host.split('.')
+        if (parts.size != 4) return false
+        val octets = parts.map { part ->
+            if (part.isEmpty() || part.length > 3 || !part.all(Char::isDigit)) return false
+            part.toInt().also { if (it > 255) return false }
+        }
+        return octets[0] == 100 && octets[1] in 64..127
     }
 
     /** Tokens go into a cookie and a header unquoted, so they must be plain visible ASCII. */

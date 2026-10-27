@@ -21,6 +21,10 @@ class Downloads(private val context: Context, private val scope: CoroutineScope,
 
     fun start(url: String, userAgent: String?, contentDisposition: String?, mimeType: String?) {
         val uri = url.toUri()
+        if (!ServerUrls.cleartextAllowed(url)) {
+            toast(context.getString(R.string.download_failed))
+            return
+        }
         if (uri.scheme != "http" && uri.scheme != "https") {
             // blob: links are handled by WebScripts.BLOB_DOWNLOADS; anything reaching here was not.
             toast(context.getString(R.string.download_unsupported))
