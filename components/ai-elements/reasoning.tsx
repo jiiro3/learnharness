@@ -157,6 +157,9 @@ export const ReasoningTrigger = memo(
              mono caps of the card eyebrows — matching YOUR THINKING, whose
              rail offsets it by exactly the one-character difference. */
           "flex w-full items-center gap-2 text-muted-foreground text-xs font-medium uppercase tracking-wide transition-colors hover:text-foreground",
+          /* Phone (fork: mobile-layout): a 44px hit band, layout unmoved
+             (the padding is paid back by the negative margin). */
+          "phone:-my-3.5 phone:py-3.5",
           className
         )}
         {...props}

@@ -250,6 +250,16 @@ export function Chat({
 	nativeRef.current = nativeMessages;
 	const sessionFindScopeRef = useRef<HTMLDivElement | null>(null);
 	const scrollContextRef = useRef<StickToBottomContext | null>(null);
+	/* FOLLOW THE REPLY (fork: mobile-layout, phone only): the learner's own
+	 * send re-engages stick-to-bottom, so the reply — or the lesson after an
+	 * answer (the plan approval included) — streams into view. On a phone
+	 * the lock is easily lost under the learner's thumb or the keyboard's
+	 * resize, and the new content used to start well below the screen. The
+	 * extra duration covers the dock's morph (question → composer). */
+	const followReply = useCallback(() => {
+		if (!isPhoneNow()) return;
+		void scrollContextRef.current?.scrollToBottom({ animation: "smooth", duration: 600 });
+	}, []);
 	const sourceTextParts = useMemo(() => firstSourceTextParts(messages), [messages]);
 
 	// The reattach settled terminal → the sync-and-continue seam (below).
@@ -501,8 +511,9 @@ export function Chat({
 			if (!problem) return;
 			lastInputRef.current = { type: "thinking", problemCallId: problem.toolCallId, text, at: nativeRef.current.length };
 			void send({ type: "thinking", problemCallId: problem.toolCallId, text });
+			followReply();
 		},
-		[send],
+		[send, followReply],
 	);
 
 	// Teach-phase check (W5, vision §2): a pending QUIZ that lands once a
@@ -714,7 +725,8 @@ export function Chat({
 		if (!nextReady) return;
 		lastInputRef.current = { type: "next", at: nativeRef.current.length };
 		void send({ type: "next" });
-	}, [nextReady, send]);
+		followReply();
+	}, [nextReady, send, followReply]);
 
 	/* ENTER FROM ANYWHERE (owner round 16 refinement, 2026-10-06 —
 	 * keyboard-first): the move-on must not require composer focus. The
@@ -1159,6 +1171,7 @@ export function Chat({
 		applyText("");
 		lastInputRef.current = { type: "text", text: t, at: nativeRef.current.length };
 		void send({ type: "text", text: t });
+		followReply();
 	};
 
 	/* STEER VS SEND (owner arc 2026-10-03): a send while a turn runs steers
@@ -1178,6 +1191,7 @@ export function Chat({
 			applyText("");
 			lastInputRef.current = { type: "steer", text: t, at: nativeRef.current.length };
 			void steer(t);
+			followReply();
 			return;
 		}
 		doSend();
@@ -1783,7 +1797,15 @@ export function Chat({
 							// applies.
 							nextProblem={nextReady}
 							onNext={sendNext}
-							placeholder={nextReady ? "Ask anything, or press Enter for the next one." : undefined}
+							// Phone: Enter is a newline there — the green button is
+							// the move-on (fork: mobile-layout).
+							placeholder={
+								nextReady
+									? phone
+										? "Ask anything, or tap Next problem."
+										: "Ask anything, or press Enter for the next one."
+									: undefined
+							}
 						/>
 					}
 					onSubmitAnswer={(output) => {
@@ -1803,6 +1825,7 @@ export function Chat({
 						const answer = reading ? { ...output, readingThinking: reading } : output;
 						lastInputRef.current = { type: "answer", tool: pending.tool, toolCallId: pending.toolCallId, output: answer, at: nativeRef.current.length };
 						submitAnswer(pending.tool, pending.toolCallId, answer);
+						followReply();
 					}}
 				/>
 				</Conversation>

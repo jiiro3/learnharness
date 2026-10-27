@@ -754,7 +754,7 @@ function QuestionDockForm({
 				GRAYS it out — the layout holds, no value is sent, the IDK
 				signal stands alone. */}
 			{kind === "quiz" && (
-				<div className="border-t border-border/60 px-4 py-2.5">
+				<div className="border-t border-border/60 px-4 py-2.5 phone:py-0.5">
 					<div className="flex items-center gap-3">
 						<span
 							className={cn(
@@ -765,7 +765,7 @@ function QuestionDockForm({
 							Confidence
 						</span>
 						<div
-							className={cn("relative h-4 min-w-0 flex-1", sel.dontKnow && "opacity-40")}
+							className={cn("relative h-4 min-w-0 flex-1 phone:h-11", sel.dontKnow && "opacity-40")}
 							data-testid="confidence-track"
 						>
 							{/* The RAIL is painted here, not on the input: this overlay spans
@@ -813,6 +813,10 @@ function QuestionDockForm({
 									"absolute inset-0 h-4 w-full cursor-pointer appearance-none bg-transparent outline-none",
 									"[&::-webkit-slider-runnable-track]:h-4 [&::-webkit-slider-runnable-track]:bg-transparent",
 									"[&::-webkit-slider-thumb]:size-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-current",
+									// Phone (fork: mobile-layout): a 44px-tall touch band. The
+									// track fills it and the 16px disc is centered in it (WebKit
+									// top-aligns the thumb in a taller track: (44 − 16) / 2).
+									"phone:h-11 phone:[&::-webkit-slider-runnable-track]:h-11 phone:[&::-webkit-slider-thumb]:mt-3.5 phone:[&::-moz-range-track]:h-11",
 									"[&::-moz-range-track]:h-4 [&::-moz-range-track]:bg-transparent",
 									"[&::-moz-range-thumb]:size-4 [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-current",
 								)}

@@ -97,7 +97,7 @@ export function DeleteNodeBody({
 						data-testid="node-delete-retry"
 						onClick={onRun}
 						disabled={busy}
-						className="ml-3 text-xs text-foreground underline-offset-2 hover:underline disabled:opacity-40"
+						className="ml-3 text-xs text-foreground underline-offset-2 hover:underline disabled:opacity-40 phone:-my-3.5 phone:py-3.5"
 					>
 						Try again
 					</button>
@@ -109,7 +109,7 @@ export function DeleteNodeBody({
 					data-testid="node-delete-cancel"
 					onClick={onClose}
 					disabled={busy}
-					className="rounded-sm px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+					className="rounded-sm px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40 phone:h-11 phone:px-4 phone:text-sm"
 				>
 					Cancel
 				</button>
@@ -121,7 +121,7 @@ export function DeleteNodeBody({
 					// Destructive red (owner, polish round) — the
 					// app's established destructive pair (chat's
 					// refusal banner): border + text, fill on hover.
-					className="rounded-sm border border-destructive/50 bg-destructive/10 px-3 py-1.5 text-xs text-destructive transition-colors hover:bg-destructive/20 disabled:opacity-40"
+					className="rounded-sm border border-destructive/50 bg-destructive/10 px-3 py-1.5 text-xs text-destructive transition-colors hover:bg-destructive/20 disabled:opacity-40 phone:h-11 phone:px-4 phone:text-sm"
 				>
 					{busy ? "Deleting…" : "Delete"}
 				</button>
