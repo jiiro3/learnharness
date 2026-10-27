@@ -270,14 +270,14 @@ describe("SSR renders the desktop tree unchanged", () => {
 	});
 	it("the fit control is phone-only (hidden until the phone variant) and absent on an empty graph", () => {
 		const html = renderToStaticMarkup(createElement(GraphChromeRow, { ...PROPS, isEmpty: false }));
-		assert.match(html, /class="graph-chrome-fade-in hidden shrink-0 flex-col gap-2 phone:flex"><button[^>]*data-testid="graph-recenter"/);
+		assert.match(html, /class="graph-chrome-fade-in hidden shrink-0 flex-col gap-2 phone:flex phone:\[@media\(orientation:landscape\)\]:flex-row"><button[^>]*data-testid="graph-recenter"/);
 		assert.match(html, /data-testid="graph-recenter"[^>]*phone:size-11/);
 		const empty = renderToStaticMarkup(createElement(GraphChromeRow, { ...PROPS, isEmpty: true }));
 		assert.ok(!empty.includes("graph-recenter"));
 	});
 	it("the +/− zoom buttons stack under the fit button, same chrome, phone-only", () => {
 		const html = renderToStaticMarkup(createElement(GraphChromeRow, { ...PROPS, isEmpty: false }));
-		const camera = html.split('class="graph-chrome-fade-in hidden shrink-0 flex-col gap-2 phone:flex">')[1]?.split("</div>")[0] ?? "";
+		const camera = html.split('class="graph-chrome-fade-in hidden shrink-0 flex-col gap-2 phone:flex phone:[@media(orientation:landscape)]:flex-row">')[1]?.split("</div>")[0] ?? "";
 		const ids = [...camera.matchAll(/data-testid="(graph-[a-z-]+)"/g)].map((m) => m[1]);
 		assert.deepEqual(ids, ["graph-recenter", "graph-zoom-in", "graph-zoom-out"]);
 		assert.match(camera, /data-testid="graph-zoom-in"[^>]*phone:size-11/);

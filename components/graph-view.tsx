@@ -932,8 +932,9 @@ export function GraphChromeRow({
 				// recenter: a drifted or lost view comes back in one tap. The
 				// +/− pair stacks under it (the row has no room for two more
 				// buttons at 360px) and zooms about the view center — pinch is
-				// not the only way in. Same chrome as the gear.
-				<div className="graph-chrome-fade-in hidden shrink-0 flex-col gap-2 phone:flex">
+				// not the only way in. Same chrome as the gear. Landscape: the
+				// row has the width and the column would land on the composer.
+				<div className="graph-chrome-fade-in hidden shrink-0 flex-col gap-2 phone:flex phone:[@media(orientation:landscape)]:flex-row">
 					<button
 						type="button"
 						onClick={onRecenter}
