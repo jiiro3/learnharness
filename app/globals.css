@@ -381,6 +381,26 @@ body {
 [data-streamdown="table"] :where(th, td) {
 	font-size: inherit;
 }
+/* Phone (fork: mobile-layout): max-content made a two-column prose table
+   thousands of px wide (every cell on one line). On a phone the table
+   still hugs short content, but long cells WRAP: fit-content clamps the
+   table to the column, and each column caps at a readable measure. A
+   genuinely wide table (its min-content wider than the column, or a
+   floor of 6rem per column) still scrolls in md-blocks' overflow-x box.
+   Header cells drop streamdown's nowrap so long headers wrap too. The
+   query is the phone variant's (components/phone.ts) — desktop is
+   untouched. */
+@media (max-width: 639.98px), (pointer: coarse) and (max-width: 1023.98px) {
+	:root:not(.lh-electron) [data-streamdown="table"] {
+		width: fit-content;
+	}
+	:root:not(.lh-electron) [data-streamdown="table"] :where(th, td) {
+		min-width: 6rem;
+		max-width: 20rem;
+		white-space: normal;
+		overflow-wrap: break-word;
+	}
+}
 /* Column separators: a hairline left rule on every cell but the first in
    its row (owner ask, 2026-09-19) — border-collapse merges it with the row
    rules and the outer border, no doubled lines anywhere. */
