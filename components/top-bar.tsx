@@ -43,9 +43,9 @@ import { SidebarToggle } from "@/components/sidebar";
 import { PhoneBackButton } from "@/components/bottom-nav";
 
 /** Phone (fork: mobile-layout): a full-screen session's bar folds away
- *  while the soft keyboard is up on a LOW viewport (a phone in landscape)
+ *  while the soft keyboard is up in landscape (portrait keeps it)
  *  — its 56px would otherwise push the question under the bar. */
-const PHONE_KB_COLLAPSE = "phone:[@media(max-height:500px)]:[.lh-kb-open_&]:hidden";
+const PHONE_KB_COLLAPSE = "phone:[@media(orientation:landscape)]:[.lh-kb-open_&]:hidden";
 // Phone header geometry (fork: mobile-layout): the bar grows in height
 // with a large font scale instead of clipping, and never scrolls sideways
 // (the title truncates; overflow-x clip is the net, and still lets the

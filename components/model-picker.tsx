@@ -334,7 +334,7 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 				// view's floating top-right buttons (import notes, gear,
 				// coverage) — blurred, fuller opacity, shadowed — so the
 				// graph no longer bleeds through these pills.
-				className="flex items-center gap-1.5 rounded-full border bg-card/85 px-2.5 py-1 shadow-lg backdrop-blur transition-colors hover:border-border hover:bg-muted phone:min-w-0 phone:whitespace-nowrap"
+				className="flex items-center gap-1.5 rounded-full border bg-card/85 px-2.5 py-1 shadow-lg backdrop-blur transition-colors hover:border-border hover:bg-muted phone:min-w-18 phone:whitespace-nowrap"
 			>
 				<span className="text-card-foreground phone:hidden">{effectiveId ? prettyModel(effectiveId) : "—"}</span>
 				{/* Phone: the compact label, one line, ellipsized when tight. */}

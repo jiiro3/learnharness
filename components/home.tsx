@@ -313,7 +313,7 @@ export function Home({
 						dictationSlot={<DictationBar dictation={dictation} />}
 						turns={[] as TurnUsage[]}
 						leadingSlot={
-							<div className="flex items-center gap-0.5 rounded-md border border-border/60 bg-background p-0.5" data-testid="home-mode-switch">
+							<div className="flex items-center gap-0.5 rounded-md border border-border/60 bg-background p-0.5 phone:shrink-0" data-testid="home-mode-switch">
 								{(["teach", "practice"] as const).map((m) => (
 									<button
 										key={m}
@@ -322,7 +322,7 @@ export function Home({
 										aria-pressed={mode === m}
 										onClick={() => setMode(m)}
 										className={
-											"flex items-center gap-1 rounded-sm px-2 py-0.5 text-[11px] uppercase tracking-wider transition-colors phone:h-11 phone:px-3.5 " +
+											"flex items-center gap-1 rounded-sm px-2 py-0.5 text-[11px] uppercase tracking-wider transition-colors phone:h-11 phone:px-2 " +
 											(mode === m
 												? "bg-accent text-foreground"
 												: "text-muted-foreground hover:text-foreground")
