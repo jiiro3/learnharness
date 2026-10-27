@@ -61,6 +61,7 @@ export function SettingsRow({
 	children,
 	testid,
 	dimmed,
+	stackOnPhone,
 }: {
 	label: string;
 	hint?: ReactNode;
@@ -69,9 +70,20 @@ export function SettingsRow({
 	/** Dependency graying, graph-view style: the whole row dims when the
 	 *  control is inert (parent off, no file yet, …). */
 	dimmed?: boolean;
+	/** Phone only: put the controls UNDER the label + hint, so a long hint
+	 *  gets the full width instead of wrapping one word per line beside
+	 *  wide controls. Desktop keeps the side-by-side row. */
+	stackOnPhone?: boolean;
 }) {
 	return (
-		<div data-testid={testid} className={cn("flex items-center justify-between gap-4 py-1", dimmed && "opacity-40")}>
+		<div
+			data-testid={testid}
+			className={cn(
+				"flex items-center justify-between gap-4 py-1",
+				stackOnPhone && "phone:flex-col phone:items-start phone:gap-1.5",
+				dimmed && "opacity-40",
+			)}
+		>
 			<span className="min-w-0">
 				<span className="block font-prose text-(length:--lh-prose-size)">{label}</span>
 				{hint && <span className="block text-xs text-muted-foreground/70">{hint}</span>}

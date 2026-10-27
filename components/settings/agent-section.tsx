@@ -642,6 +642,7 @@ export function AgentSection({
 							label={SLOT_META[slot].label}
 							hint={SLOT_META[slot].roster}
 							testid={`slot-row-${slot}`}
+							stackOnPhone
 						>
 							{/* The anchor for the outside-click contract is the
 							    span holding BOTH triggers of the open menu. */}
@@ -760,6 +761,7 @@ export function AgentSection({
 							label="Quizzing"
 							hint="How both tutors check your understanding"
 							testid="quiz-mechanics-row"
+							stackOnPhone
 						>
 							<div
 								role="radiogroup"
