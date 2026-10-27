@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDownIcon, ChevronRightIcon, PlayIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { finishDictation, isDictationActive, joinDictation, useDictationTarget } from "@/components/dictation";
-import { useEnterSubmits } from "@/components/enter-submits";
+import { enterSends, useEnterSubmits } from "@/components/enter-submits";
 import { ToolContentResponse } from "@/components/ai-elements/message";
 import { cn } from "@/lib/utils";
 import {
@@ -754,7 +754,7 @@ function QuestionDockForm({
 				GRAYS it out — the layout holds, no value is sent, the IDK
 				signal stands alone. */}
 			{kind === "quiz" && (
-				<div className="border-t border-border/60 px-4 py-2.5">
+				<div className="border-t border-border/60 px-4 py-2.5 phone:py-0.5">
 					<div className="flex items-center gap-3">
 						<span
 							className={cn(
@@ -765,7 +765,7 @@ function QuestionDockForm({
 							Confidence
 						</span>
 						<div
-							className={cn("relative h-4 min-w-0 flex-1", sel.dontKnow && "opacity-40")}
+							className={cn("relative h-4 min-w-0 flex-1 phone:h-11", sel.dontKnow && "opacity-40")}
 							data-testid="confidence-track"
 						>
 							{/* The RAIL is painted here, not on the input: this overlay spans
@@ -813,6 +813,10 @@ function QuestionDockForm({
 									"absolute inset-0 h-4 w-full cursor-pointer appearance-none bg-transparent outline-none",
 									"[&::-webkit-slider-runnable-track]:h-4 [&::-webkit-slider-runnable-track]:bg-transparent",
 									"[&::-webkit-slider-thumb]:size-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-current",
+									// Phone (fork: mobile-layout): a 44px-tall touch band. The
+									// track fills it and the 16px disc is centered in it (WebKit
+									// top-aligns the thumb in a taller track: (44 − 16) / 2).
+									"phone:h-11 phone:[&::-webkit-slider-runnable-track]:h-11 phone:[&::-webkit-slider-thumb]:mt-3.5 phone:[&::-moz-range-track]:h-11",
 									"[&::-moz-range-track]:h-4 [&::-moz-range-track]:bg-transparent",
 									"[&::-moz-range-thumb]:size-4 [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-current",
 								)}
@@ -869,7 +873,8 @@ function QuestionDockForm({
 								}
 								// Chat convention: Enter submits, Shift+Enter is a newline;
 								// ⌘/Ctrl+Enter also submits (universal across the app).
-								if (e.key === "Enter" && (e.metaKey || e.ctrlKey || !e.shiftKey)) {
+								// Phone: plain Enter is a newline (enterSends).
+								if (enterSends(e)) {
 									e.preventDefault();
 									submit();
 								}
@@ -899,7 +904,8 @@ function QuestionDockForm({
 								// THE STANDARD CHORD (owner round 5, 2026-10-05): Enter
 								// submits, Shift+Enter is a newline, ⌘/Ctrl+Enter works
 								// too — identical to the practice dock and the composer.
-								if (e.key === "Enter" && (!e.shiftKey || e.metaKey || e.ctrlKey)) {
+								// Phone: plain Enter is a newline (enterSends).
+								if (enterSends(e)) {
 									e.preventDefault();
 									submit();
 								}

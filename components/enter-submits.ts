@@ -36,6 +36,33 @@
 
 import { useEffect, useRef } from "react";
 import { isTypingSurface } from "@/src/core";
+import { isPhoneNow } from "@/components/phone";
+
+/** The keydown fields enterSends reads (React and DOM events both fit). */
+export interface EnterKeyLike {
+	key: string;
+	shiftKey: boolean;
+	metaKey: boolean;
+	ctrlKey: boolean;
+}
+
+/**
+ * THE FIELD-LEVEL ENTER RULE for multi-line fields (fork: mobile-layout):
+ * does this keydown send/submit the field?
+ *
+ * - Desktop (unchanged): plain Enter sends, Shift+Enter is a newline, and
+ *   ⌘/Ctrl+Enter sends too (the universal submit chord).
+ * - Phone: plain Enter is a NEWLINE — a soft keyboard's Enter key is the
+ *   only way to break a line, and the send button is right there. Only
+ *   ⌘/Ctrl+Enter (a hardware keyboard) sends.
+ *
+ * `phone` defaults to the live layout gate; tests pass it explicitly.
+ */
+export function enterSends(e: EnterKeyLike, phone: boolean = isPhoneNow()): boolean {
+	if (e.key !== "Enter") return false;
+	if (e.metaKey || e.ctrlKey) return true;
+	return !phone && !e.shiftKey;
+}
 
 /** Overlay roots whose buttons keep native Enter (hand-rolled menus mark
  *  themselves data-lh-menu; Radix poppers/dialogs carry their own attrs). */

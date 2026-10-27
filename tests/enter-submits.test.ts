@@ -13,7 +13,7 @@
 import assert from "node:assert/strict";
 import { parseHTML } from "linkedom";
 import { describe, it } from "node:test";
-import { buttonKeepsNativeEnter } from "../components/enter-submits.ts";
+import { buttonKeepsNativeEnter, enterSends } from "../components/enter-submits.ts";
 import { blurAfterPointerClick } from "../components/focus-hygiene.ts";
 
 const { document } = parseHTML("<html><body></body></html>");
@@ -78,5 +78,39 @@ describe("blurAfterPointerClick (focus hygiene)", () => {
 		};
 		blurAfterPointerClick({ detail: 0, currentTarget: b });
 		assert.equal(blurred, false);
+	});
+});
+
+describe("enterSends (the field-level Enter rule; phone: Enter is a newline)", () => {
+	const key = (k: string, mods: Partial<{ shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }> = {}) => ({
+		key: k,
+		shiftKey: false,
+		metaKey: false,
+		ctrlKey: false,
+		...mods,
+	});
+
+	it("desktop: plain Enter sends, Shift+Enter is a newline, ⌘/Ctrl+Enter sends", () => {
+		assert.equal(enterSends(key("Enter"), false), true);
+		assert.equal(enterSends(key("Enter", { shiftKey: true }), false), false);
+		assert.equal(enterSends(key("Enter", { metaKey: true }), false), true);
+		assert.equal(enterSends(key("Enter", { ctrlKey: true }), false), true);
+		assert.equal(enterSends(key("Enter", { ctrlKey: true, shiftKey: true }), false), true);
+	});
+
+	it("phone: plain and Shift+Enter are newlines; only ⌘/Ctrl+Enter sends", () => {
+		assert.equal(enterSends(key("Enter"), true), false);
+		assert.equal(enterSends(key("Enter", { shiftKey: true }), true), false);
+		assert.equal(enterSends(key("Enter", { metaKey: true }), true), true);
+		assert.equal(enterSends(key("Enter", { ctrlKey: true }), true), true);
+	});
+
+	it("other keys never send", () => {
+		assert.equal(enterSends(key("a"), false), false);
+		assert.equal(enterSends(key("Escape", { ctrlKey: true }), true), false);
+	});
+
+	it("defaults to the live layout gate (no matchMedia in node: desktop)", () => {
+		assert.equal(enterSends(key("Enter")), true);
 	});
 });

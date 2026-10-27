@@ -3,6 +3,7 @@
 import { ArrowRightIcon, CornerDownLeftIcon, SquareIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Hint } from "@/components/ui/hint";
+import { enterSends } from "@/components/enter-submits";
 
 /**
  * The chat composer — content row ONLY (the persistent rounded shell lives in
@@ -108,7 +109,8 @@ export function Composer({
 					// Chat convention: Enter sends, Shift+Enter is a newline.
 					// ⌘/Ctrl+Enter also sends — the universal submit shortcut
 					// across every input in the app (thinking field, answers).
-					if (e.key === "Enter" && (e.metaKey || e.ctrlKey || !e.shiftKey)) {
+					// Phone: plain Enter is a newline (enterSends).
+					if (enterSends(e)) {
 						e.preventDefault();
 						act();
 					}
@@ -137,7 +139,7 @@ export function Composer({
 						type="submit"
 						data-testid="next-problem-button"
 						aria-label="Next problem"
-						className="flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-[10px] bg-green-600 px-4 font-ui text-xs font-medium uppercase tracking-wide text-white transition-colors hover:bg-green-500"
+						className="flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-[10px] phone:h-11 bg-green-600 px-4 font-ui text-xs font-medium uppercase tracking-wide text-white transition-colors hover:bg-green-500"
 					>
 						Next problem
 						<ArrowRightIcon className="size-4" />
@@ -148,7 +150,7 @@ export function Composer({
 						aria-label={busy && !canSend ? "Stop" : "Send"}
 						disabled={!busy && !canSend}
 						className={cn(
-							"flex size-10 shrink-0 items-center justify-center rounded-[10px] transition-colors",
+							"flex size-10 shrink-0 items-center justify-center rounded-[10px] transition-colors phone:size-11",
 							busy && !canSend
 								? "bg-secondary text-foreground hover:bg-accent"
 								: "bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-40",
@@ -158,5 +160,30 @@ export function Composer({
 					</button>
 				)}
 		</form>
+	);
+}
+
+/** THE SEND-FAILURE NOTICE (fork: mobile-layout, phone): a send that
+ *  failed on the connection shows one friendly line + Retry above the
+ *  field, instead of a raw "Failed to fetch" (or nothing at all). Pure,
+ *  SSR-pinnable; the caller owns the retry and when it shows. */
+export function SendFailureNotice({ retrying, onRetry }: { retrying: boolean; onRetry: () => void }) {
+	return (
+		<div
+			role="alert"
+			data-testid="send-failure"
+			className="pointer-events-auto mb-2 flex items-center gap-3 rounded-xl border border-destructive/40 bg-destructive/10 py-1.5 pl-3 pr-1.5 text-sm"
+		>
+			<span className="min-w-0 flex-1">Couldn&apos;t connect. Check your connection and try again.</span>
+			<button
+				type="button"
+				data-testid="send-failure-retry"
+				disabled={retrying}
+				onClick={onRetry}
+				className="flex h-11 shrink-0 items-center rounded-lg border border-border bg-card px-4 font-medium transition-colors hover:bg-accent disabled:opacity-60"
+			>
+				{retrying ? "Retrying…" : "Retry"}
+			</button>
+		</div>
 	);
 }
