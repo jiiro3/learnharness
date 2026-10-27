@@ -1024,8 +1024,9 @@ describe("tool + renderer registry wiring", () => {
 		}
 	});
 
-	it("the tool-call card: the prober's graph tools — collapsed headline + their compact row output", () => {
-		// list_propositions: the session id is the call's subject
+	it("the tool-call card: the prober's graph tools — a human label + their compact row output, never the raw tool name", () => {
+		const summaryOf = (html: string) => html.split("<summary")[1]?.split("</summary>")[0] ?? "";
+		// list_propositions: the session id is an internal — expanded input only
 		const propPart = {
 			type: "tool-list_propositions",
 			state: "output-available",
@@ -1034,13 +1035,14 @@ describe("tool + renderer registry wiring", () => {
 			output: "2 proposition(s) born in this session:\n- Kepler's laws — solid (as of 2026-09-20)\n- Tidal locking — shaky (as of 2026-09-21)",
 		};
 		const html = renderToStaticMarkup(<ToolCallCard part={propPart as never} />);
-		assert.match(html, /list_propositions/);
-		assert.match(html, /chat_mtiudjao_776beada/); // the collapsed headline
+		const propHeadline = summaryOf(html);
+		assert.match(propHeadline, /Looked up a past session/);
+		assert.doesNotMatch(propHeadline, /list_propositions/, "the raw tool name never renders");
+		assert.doesNotMatch(propHeadline, /chat_mtiudjao/, "the internal session id stays out of the collapsed line");
 		assert.match(html, /Kepler&#x27;s laws/); // the row output, verbatim (apostrophe HTML-escaped)
 		assert.ok(html.includes("<details"), "collapsed by default");
 
-		// list_sessions: no headline arg (empty input) — the tool name alone,
-		// exactly the ls-with-no-path discipline
+		// list_sessions: no headline arg (empty input) — the label alone
 		const sessPart = {
 			type: "tool-list_sessions",
 			state: "output-available",
@@ -1049,13 +1051,15 @@ describe("tool + renderer registry wiring", () => {
 			output: "3 session(s) in the knowledge graph, most recent first:\n1. Orbital mechanics (chat, 8 propositions, born 2026-09-18)",
 		};
 		const html2 = renderToStaticMarkup(<ToolCallCard part={sessPart as never} />);
-		assert.match(html2, /list_sessions/);
+		const headline = summaryOf(html2);
+		assert.match(headline, /Looked up past sessions/);
+		assert.doesNotMatch(headline, /list_sessions/i, "the raw tool name never renders (QA: LIST_SESSIONS in the chat)");
+		assert.doesNotMatch(headline, /uppercase/, "no shouted label");
 		assert.match(html2, /Orbital mechanics/);
-		const headline = html2.split("<summary")[1]?.split("</summary>")[0] ?? "";
-		assert.doesNotMatch(headline, /Orbital/, "the collapsed line shows the tool name only — no noise");
+		assert.doesNotMatch(headline, /Orbital/, "the collapsed line shows the label only — no noise");
 	});
 
-	it("the tool-call card: collapsed one-liner with the tool name + headline arg; expand shows input and output", () => {
+	it("the tool-call card: collapsed one-liner with a human label + headline arg; expand shows input and output", () => {
 		const part = {
 			type: "tool-read",
 			state: "output-available",
@@ -1064,8 +1068,8 @@ describe("tool + renderer registry wiring", () => {
 			output: "Calculus notes\nThe derivative measures force.",
 		};
 		const html = renderToStaticMarkup(<ToolCallCard part={part as never} />);
-		// collapsed headline: tool name + path as given
-		assert.match(html, /read/);
+		// collapsed headline: human label + path as given
+		assert.match(html, /Read a file/);
 		assert.match(html, /notes\/calculus\.md/);
 		// expandable payload: input JSON + output text
 		assert.match(html, /Input/);
@@ -1104,12 +1108,12 @@ describe("tool + renderer registry wiring", () => {
 		const findHtml = renderToStaticMarkup(
 			<ToolCallCard part={{ type: "tool-find", state: "output-available", toolCallId: "c", input: { pattern: "*calculus*" }, output: "notes/calculus.md" } as never} />,
 		);
-		assert.match(findHtml, /find/);
+		assert.match(findHtml, /Found files/);
 		assert.match(findHtml, /\*calculus\*/);
 		const lsHtml = renderToStaticMarkup(
 			<ToolCallCard part={{ type: "tool-ls", state: "output-available", toolCallId: "c", input: {}, output: "notes/" } as never} />,
 		);
-		assert.match(lsHtml, /ls/);
+		assert.match(lsHtml, /Listed a directory/);
 		assert.match(lsHtml, /~/);
 	});
 });

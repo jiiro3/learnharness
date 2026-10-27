@@ -36,6 +36,15 @@ describe("LiveToolCard (the working-state grammar)", () => {
 		);
 	});
 
+	it("the graph tools get human labels; the internal session id stays off the header", () => {
+		const sessions = renderToStaticMarkup(<LiveToolCard part={part("list_sessions", {}) as never} />);
+		assert.match(sessions, /Looking up past sessions…/);
+		const props = renderToStaticMarkup(<LiveToolCard part={part("list_propositions", { session: "chat_abc" }) as never} />);
+		assert.match(props, /Looking up a past session…/);
+		const header = props.split("<summary")[1]?.split("</summary>")[0] ?? "";
+		assert.doesNotMatch(header, /chat_abc|list_propositions/);
+	});
+
 	it("no input yet renders a placeholder, not an empty pre", () => {
 		const html = renderToStaticMarkup(<LiveToolCard part={part("grep", undefined) as never} />);
 		assert.match(html, /<pre[^>]*>…<\/pre>/);
