@@ -21,32 +21,48 @@ import { SEND_TO_USER_TOOL, userFacingTextOf } from "../core/native-messages.ts"
 
 const QUESTION_SET = new Set<string>(QUESTION_TOOLS);
 
-/** True when the transcript ends in a graded answer that no visible
- *  assistant text has followed yet. Pure, exported for tests. */
-export function answerAwaitsVisibleReply(messages: readonly AgentMessage[]): boolean {
+/** Refusals per answer before the guard steps aside: a backstop, never a
+ *  loop the session can get stuck in (or pay for). */
+export const FEEDBACK_GUARD_MAX_REFUSALS = 3;
+
+const REFUSAL_MARK = "Question not posed: his last answer has no written reply yet.";
+
+/** Where the transcript stands relative to the learner's last graded
+ *  answer: whether it still awaits a visible reply, and how many times
+ *  this guard has refused since. Pure, exported for tests. */
+export function answerReplyState(messages: readonly AgentMessage[]): { awaiting: boolean; refusals: number } {
+	let refusals = 0;
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const m = messages[i] as { role?: string; content?: unknown; toolName?: string; isError?: boolean };
 		if (m.role === "assistant") {
-			if (userFacingTextOf(m.content).length > 0) return false;
+			if (userFacingTextOf(m.content).length > 0) return { awaiting: false, refusals };
 			continue;
 		}
-		if (m.role === "user") return false;
-		// The graded answer: a question call's clean result. Errored
-		// results are the retry loop (this guard's own refusals included).
-		if (m.role === "toolResult" && m.toolName !== undefined && QUESTION_SET.has(m.toolName) && m.isError !== true) {
-			return true;
+		if (m.role === "user") return { awaiting: false, refusals };
+		if (m.role === "toolResult" && m.toolName !== undefined && QUESTION_SET.has(m.toolName)) {
+			// The graded answer: a question call's clean result. Errored
+			// results are the retry loop (this guard's refusals included).
+			if (m.isError !== true) return { awaiting: true, refusals };
+			if (JSON.stringify(m.content ?? "").includes(REFUSAL_MARK)) refusals++;
 		}
 		// other tool results, markers, steers: not a boundary, keep scanning
 	}
-	return false;
+	return { awaiting: false, refusals };
+}
+
+/** True when the transcript ends in a graded answer that no visible
+ *  assistant text has followed yet. */
+export function answerAwaitsVisibleReply(messages: readonly AgentMessage[]): boolean {
+	return answerReplyState(messages).awaiting;
 }
 
 /** The refusal the model reads (a tool error, retried like a schema miss). */
 export function feedbackGuardReason(hasOutputTool: boolean): string {
-	const channel = hasOutputTool ? `a ${SEND_TO_USER_TOOL} message` : "visible text";
+	const how = hasOutputTool
+		? `Call ${SEND_TO_USER_TOOL} now, in this same response and before the question, with that feedback; ordinary text and reasoning do not reach him.`
+		: "Write that feedback as visible text before the question; your reasoning does not reach him.";
 	return (
-		`Question not posed: his last answer has no written reply yet. Your reasoning is invisible to him. ` +
-		`First write ${channel}: acknowledge his answer and give the correction or explanation. Then ask the question again.`
+		`${REFUSAL_MARK} Acknowledge his answer and give the correction or explanation. ${how} Then ask the question again.`
 	);
 }
 
@@ -57,7 +73,8 @@ export async function feedbackGuard(ctx: BeforeToolCallContext): Promise<BeforeT
 	// The requesting message is normally already in context; include it
 	// when it is not, so a same-message send_to_user/text counts.
 	const scan = messages.at(-1) === ctx.assistantMessage ? messages : [...messages, ctx.assistantMessage];
-	if (!answerAwaitsVisibleReply(scan)) return undefined;
+	const state = answerReplyState(scan);
+	if (!state.awaiting || state.refusals >= FEEDBACK_GUARD_MAX_REFUSALS) return undefined;
 	const hasOutputTool = (ctx.context.tools ?? []).some((t) => t.name === SEND_TO_USER_TOOL);
 	return { block: true, reason: feedbackGuardReason(hasOutputTool) };
 }

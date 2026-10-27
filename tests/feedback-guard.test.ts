@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createFauxCore, fauxAssistantMessage, fauxText, fauxThinking, fauxToolCall } from "@earendil-works/pi-ai";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { answerAwaitsVisibleReply, feedbackGuard, feedbackGuardReason } from "../src/agent/feedback-guard.ts";
+import { FEEDBACK_GUARD_MAX_REFUSALS, answerAwaitsVisibleReply, feedbackGuard, feedbackGuardReason } from "../src/agent/feedback-guard.ts";
 import { createProberAgent, createTeacherAgent, bareQuestionTools } from "../src/agent/teacher-agent.ts";
 import type { PiEngine } from "../src/agent/models.ts";
 
@@ -85,6 +85,18 @@ describe("feedbackGuard", () => {
 	it("lets the question through once the same message carries visible feedback", async () => {
 		assert.equal(await feedbackGuard(ctx([...history, assistant([sendToUser("Not quite."), fauxToolCall("quiz", quizArgs)])])), undefined);
 		assert.equal(await feedbackGuard(ctx([...history, assistant([fauxText("Not quite."), fauxToolCall("quiz", quizArgs)])])), undefined);
+	});
+
+	it("steps aside after the refusal cap, so a stubborn model can never loop the session", async () => {
+		const refusal = {
+			...result("quiz", true),
+			content: [{ type: "text", text: feedbackGuardReason(true) }],
+		} as AgentMessage;
+		const refused: AgentMessage[] = [];
+		for (let i = 0; i < FEEDBACK_GUARD_MAX_REFUSALS; i++) refused.push(assistant([fauxToolCall("quiz", quizArgs)]), refusal);
+		const last = assistant([fauxToolCall("quiz", quizArgs)]);
+		assert.ok(await feedbackGuard(ctx([...history, ...refused.slice(0, -2), last])), "below the cap: still refused");
+		assert.equal(await feedbackGuard(ctx([...history, ...refused, last])), undefined, "at the cap: let through");
 	});
 
 	it("never touches non-question tools", async () => {
