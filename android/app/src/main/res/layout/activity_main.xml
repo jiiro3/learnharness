@@ -13,8 +13,11 @@
         android:layout_height="match_parent"
         android:visibility="gone" />
 
+    <!-- The native panels are clickable so a tap on them never reaches the WebView underneath. -->
     <ScrollView
         android:id="@+id/error_panel"
+        android:clickable="true"
+        android:focusable="false"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:background="@color/lh_background"
@@ -69,6 +72,8 @@
     <!-- Shown while a cold-starting server is retried (WakeRetry); dark like the web app. -->
     <LinearLayout
         android:id="@+id/waking_panel"
+        android:clickable="true"
+        android:focusable="false"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:background="@color/lh_web_background"
@@ -141,6 +146,8 @@
 
     <ScrollView
         android:id="@+id/setup_panel"
+        android:clickable="true"
+        android:focusable="false"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:background="@color/lh_background"

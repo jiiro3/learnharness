@@ -56,8 +56,9 @@ android {
         applicationId = "com.jiiro.learnharness"
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
-        versionCode = providers.gradleProperty("lhVersionCode").orNull?.toInt() ?: 2
-        versionName = "0.1.1"
+        // -PlhVersionCode / -PlhVersionName override these for throwaway update-test builds.
+        versionCode = providers.gradleProperty("lhVersionCode").orNull?.toInt() ?: 3
+        versionName = providers.gradleProperty("lhVersionName").orNull ?: "0.1.2"
         buildConfigField("boolean", "WEB_DEBUGGING", developerDebug.toString())
     }
     buildFeatures { buildConfig = true }
