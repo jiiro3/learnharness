@@ -5,6 +5,8 @@
     <!-- Dictation: bridged to getUserMedia({ audio }) for the configured server only. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- In-app updates (Updater) install through a PackageInstaller session. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <queries>
         <!-- Custom Tabs for off-origin links. -->

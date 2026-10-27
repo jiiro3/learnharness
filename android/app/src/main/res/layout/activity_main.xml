@@ -7,17 +7,11 @@
     tools:ignore="MergeRootFrame">
 
     <!-- The WebView is created in code and added here, so a new server gets a fresh one. -->
-    <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
-        android:id="@+id/swipe"
+    <FrameLayout
+        android:id="@+id/web_container"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:visibility="gone">
-
-        <FrameLayout
-            android:id="@+id/web_container"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent" />
-    </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
+        android:visibility="gone" />
 
     <ScrollView
         android:id="@+id/error_panel"
@@ -36,8 +30,10 @@
             android:padding="32dp">
 
             <TextView
+                android:id="@+id/error_title"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:gravity="center_horizontal"
                 android:text="@string/error_title"
                 android:textAppearance="@android:style/TextAppearance.Material.Headline"
                 android:textColor="@color/lh_on_background" />
@@ -69,6 +65,79 @@
                 android:text="@string/server_settings" />
         </LinearLayout>
     </ScrollView>
+
+    <!-- Shown while a cold-starting server is retried (WakeRetry); dark like the web app. -->
+    <LinearLayout
+        android:id="@+id/waking_panel"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/lh_web_background"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="32dp"
+        android:visibility="gone">
+
+        <ProgressBar
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:indeterminate="true"
+            android:indeterminateTint="@color/lh_waking_text" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/waking"
+            android:textAppearance="@android:style/TextAppearance.Material.Body1"
+            android:textColor="@color/lh_waking_text" />
+    </LinearLayout>
+
+    <!-- In-app update prompt (Updater). Non-blocking: the page stays usable around it. -->
+    <FrameLayout
+        android:id="@+id/update_holder"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:visibility="gone"
+        tools:ignore="UselessParent">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_margin="12dp"
+            android:background="@drawable/update_bar_background"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="16dp"
+            android:paddingEnd="4dp">
+
+            <TextView
+                android:id="@+id/update_text"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:paddingTop="12dp"
+                android:paddingBottom="12dp"
+                android:textAppearance="@android:style/TextAppearance.Material.Body1"
+                android:textColor="@color/lh_waking_text" />
+
+            <Button
+                android:id="@+id/update_later"
+                style="@android:style/Widget.Material.Button.Borderless"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/update_later"
+                android:textColor="@color/lh_update_secondary" />
+
+            <Button
+                android:id="@+id/update_install"
+                style="@android:style/Widget.Material.Button.Borderless"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/update_install"
+                android:textColor="@color/lh_waking_text" />
+        </LinearLayout>
+    </FrameLayout>
 
     <ScrollView
         android:id="@+id/setup_panel"

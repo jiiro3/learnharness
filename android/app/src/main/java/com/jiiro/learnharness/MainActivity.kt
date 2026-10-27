@@ -11,7 +11,8 @@ import android.net.ConnectivityManager
 import android.net.Uri
 import android.net.http.SslError
 import android.os.Bundle
-import android.view.MotionEvent
+import android.os.Handler
+import android.os.Looper
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
@@ -45,7 +46,6 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.isVisible
 import androidx.core.view.updatePadding
 import androidx.lifecycle.lifecycleScope
-import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import kotlinx.coroutines.launch
@@ -58,10 +58,11 @@ import kotlin.math.max
  */
 class MainActivity : ComponentActivity() {
     private lateinit var root: FrameLayout
-    private lateinit var swipe: SwipeRefreshLayout
     private lateinit var webContainer: FrameLayout
     private lateinit var errorPanel: View
+    private lateinit var errorTitle: TextView
     private lateinit var errorMessage: TextView
+    private lateinit var wakingPanel: View
     private lateinit var setupPanel: View
     private lateinit var urlInput: EditText
     private lateinit var tokenInput: EditText
@@ -74,13 +75,15 @@ class MainActivity : ComponentActivity() {
 
     /** Main-frame URL whose load failed; Retry loads it again. */
     private var failedUrl: String? = null
+
+    /** Cold-start retries (WakeRetry): attempts used, the scheduled retry, and whether the current load failed. */
+    private val handler = Handler(Looper.getMainLooper())
+    private var wakeAttempt = 0
+    private var pendingWake: Runnable? = null
+    private var loadFailed = false
     private var safeInsets = Insets.NONE
 
-    /** Whether the current touch may pull to refresh, from WebScripts.PULL_GUARD; null until it answers. */
-    private var pullAnswer: Boolean? = null
-
-    /** True while a touch-down is dispatched, so SwipeRefreshLayout can record where it started. */
-    private var touchStarting = false
+    private lateinit var updater: Updater
 
     private var pendingPermission: PermissionRequest? = null
     private var pendingFiles: ValueCallback<Array<Uri>>? = null
@@ -116,10 +119,11 @@ class MainActivity : ComponentActivity() {
         WebView.setWebContentsDebuggingEnabled(BuildConfig.WEB_DEBUGGING)
 
         root = findViewById(R.id.root)
-        swipe = findViewById(R.id.swipe)
         webContainer = findViewById(R.id.web_container)
         errorPanel = findViewById(R.id.error_panel)
+        errorTitle = findViewById(R.id.error_title)
         errorMessage = findViewById(R.id.error_message)
+        wakingPanel = findViewById(R.id.waking_panel)
         setupPanel = findViewById(R.id.setup_panel)
         urlInput = findViewById(R.id.setup_url)
         tokenInput = findViewById(R.id.setup_token)
@@ -127,18 +131,13 @@ class MainActivity : ComponentActivity() {
 
         setUpInsets()
         setUpBack()
-        swipe.setColorSchemeColors(getColor(R.color.lh_web_background))
-        // "Child can scroll up" blocks the pull. On the down event it must be false or the layout never
-        // records the gesture's start; after that the page's answer for this touch decides.
-        swipe.setOnChildScrollUpCallback { _, _ ->
-            val web = webView
-            when {
-                web == null -> true
-                touchStarting -> false
-                else -> web.scrollY > 0 || pullAnswer != true
-            }
-        }
-        swipe.setOnRefreshListener { retry() }
+        updater = Updater(
+            this,
+            findViewById(R.id.update_holder),
+            findViewById(R.id.update_text),
+            findViewById(R.id.update_install),
+            findViewById(R.id.update_later),
+        )
         findViewById<Button>(R.id.error_retry).setOnClickListener { retry() }
         findViewById<Button>(R.id.error_settings).setOnClickListener { showSetup(config) }
         findViewById<Button>(R.id.setup_save).setOnClickListener { saveSetup() }
@@ -154,25 +153,23 @@ class MainActivity : ComponentActivity() {
                 showSetup(null)
             } else {
                 openServer(saved, webState)
-                if (savedInstanceState == null && intent?.action == ACTION_SERVER_SETTINGS) showSetup(saved)
+                if (savedInstanceState == null) handleShortcut(intent, freshLaunch = true)
             }
-        }
-    }
-
-    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-        if (event.actionMasked != MotionEvent.ACTION_DOWN) return super.dispatchTouchEvent(event)
-        pullAnswer = null
-        touchStarting = true
-        try {
-            return super.dispatchTouchEvent(event)
-        } finally {
-            touchStarting = false
         }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        if (intent.action == ACTION_SERVER_SETTINGS) showSetup(config)
+        handleShortcut(intent)
+    }
+
+    /** Launcher shortcuts (res/xml/shortcuts.xml). A fresh launch is already loading the page. */
+    private fun handleShortcut(intent: Intent?, freshLaunch: Boolean = false) {
+        when (intent?.action) {
+            ACTION_SERVER_SETTINGS -> showSetup(config)
+            ACTION_RELOAD -> if (config != null && !freshLaunch) retry()
+            ACTION_CHECK_UPDATES -> updater.check(force = true)
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -181,6 +178,8 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        cancelWake()
+        updater.release()
         webView?.destroy()
         webView = null
         super.onDestroy()
@@ -192,12 +191,14 @@ class MainActivity : ComponentActivity() {
     private fun openServer(cfg: ServerConfig, state: Bundle?) {
         config = cfg
         failedUrl = null
+        resetWake()
         webView?.let { webContainer.removeView(it); it.destroy() }
         val web = createWebView(cfg)
         webView = web
         downloads = Downloads(this, lifecycleScope, cfg)
+        updater.onServer(cfg)
         webContainer.addView(web, FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
-        swipe.isVisible = true
+        webContainer.isVisible = true
         errorPanel.isVisible = false
         setupPanel.isVisible = false
         updateBarAppearance()
@@ -232,10 +233,8 @@ class MainActivity : ComponentActivity() {
         web.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
             downloads?.start(url, userAgent, contentDisposition, mimeType)
         }
-        // Blob exports and the pull-to-refresh guard: origin-scoped message channels, not
-        // addJavascriptInterface. Without them blob exports fall through to the DownloadListener's
-        // toast and pull-to-refresh is off (Retry on the error screen still reloads).
-        var bridged = false
+        // Blob exports: an origin-scoped message channel, not addJavascriptInterface. Without these
+        // features blob exports fall through to the DownloadListener's toast.
         if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
             if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
                 val rules = setOf(cfg.origin)
@@ -243,14 +242,8 @@ class MainActivity : ComponentActivity() {
                     if (isMainFrame) message.data?.let { downloads?.saveBlob(it) }
                 }
                 WebViewCompat.addDocumentStartJavaScript(web, WebScripts.BLOB_DOWNLOADS, rules)
-                WebViewCompat.addWebMessageListener(web, WebScripts.PULL_BRIDGE, rules) { _, message, _, isMainFrame, _ ->
-                    if (isMainFrame) pullAnswer = message.data == "1"
-                }
-                WebViewCompat.addDocumentStartJavaScript(web, WebScripts.PULL_GUARD, rules)
-                bridged = true
             }
         }
-        swipe.isEnabled = bridged
         return web
     }
 
@@ -263,6 +256,7 @@ class MainActivity : ComponentActivity() {
         val cfg = config ?: return
         val web = webView
         errorPanel.isVisible = false
+        resetWake()
         updateBarAppearance()
         when {
             web == null -> openServer(cfg, null)
@@ -274,11 +268,49 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun showError(message: String) {
-        swipe.isRefreshing = false
+    private fun showError(message: String, title: String = getString(R.string.error_title)) {
+        resetWake()
+        errorTitle.text = title
         errorMessage.text = message
         errorPanel.isVisible = true
         updateBarAppearance()
+    }
+
+    /**
+     * A main-frame load of [url] failed the way a cold start does: show "Waking up the server…" and
+     * load it again after the next backoff delay, or show [finalError] once retries run out.
+     */
+    private fun wakeOrFail(url: String, finalError: () -> String) {
+        loadFailed = true
+        failedUrl = url
+        val delay = WakeRetry.delayMs(wakeAttempt)
+        if (delay == null) {
+            showError(finalError())
+            return
+        }
+        wakeAttempt++
+        cancelWake()
+        errorPanel.isVisible = false
+        wakingPanel.isVisible = true
+        updateBarAppearance()
+        val job = Runnable {
+            pendingWake = null
+            val cfg = config ?: return@Runnable
+            webView?.loadUrl(url, authHeaders(cfg, url))
+        }
+        pendingWake = job
+        handler.postDelayed(job, delay)
+    }
+
+    private fun cancelWake() {
+        pendingWake?.let(handler::removeCallbacks)
+        pendingWake = null
+    }
+
+    private fun resetWake() {
+        cancelWake()
+        wakeAttempt = 0
+        wakingPanel.isVisible = false
     }
 
     private fun isOnline(): Boolean = getSystemService(ConnectivityManager::class.java)?.activeNetwork != null
@@ -346,32 +378,53 @@ class MainActivity : ComponentActivity() {
         }
 
         override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
-            if (view == webView) failedUrl = null
+            if (view != webView) return
+            failedUrl = null
+            loadFailed = false
         }
 
         override fun onPageCommitVisible(view: WebView, url: String) = injectInsets(view)
 
         override fun onPageFinished(view: WebView, url: String) {
-            swipe.isRefreshing = false
-            injectInsets(view)
+            if (view == webView && !loadFailed && pendingWake == null) {
+                if (wakingPanel.isVisible) {
+                    resetWake()
+                    updateBarAppearance()
+                }
+                // After the first good load, so a cold-starting server serves the page first.
+                updater.check(force = false)
+            }
+                injectInsets(view)
             CookieManager.getInstance().flush()
         }
 
         override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
             if (view != webView || !request.isForMainFrame) return
-            failedUrl = request.url.toString()
-            val host = request.url.host ?: request.url.toString()
-            showError(
-                if (!isOnline()) getString(R.string.error_offline)
-                else getString(R.string.error_unreachable, host, error.description),
-            )
+            val url = request.url.toString()
+            val host = request.url.host ?: url
+            val message = { getString(R.string.error_unreachable, host, error.description) }
+            failedUrl = url
+            loadFailed = true
+            when {
+                !isOnline() -> showError(getString(R.string.error_offline))
+                error.errorCode in TRANSIENT_ERRORS ->
+                    wakeOrFail(url, message)
+                else -> showError(message())
+            }
         }
 
         override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, response: WebResourceResponse) {
             if (view != webView || !request.isForMainFrame) return
-            if (response.statusCode == 401 || response.statusCode == 403) {
-                failedUrl = request.url.toString()
-                showError(getString(R.string.error_auth, response.statusCode))
+            val url = request.url.toString()
+            val status = response.statusCode
+            when {
+                WakeRetry.isAuthStatus(status) -> {
+                    failedUrl = url
+                    loadFailed = true
+                    showError(getString(R.string.error_auth, status), getString(R.string.error_auth_title))
+                }
+                WakeRetry.isWakingStatus(status) ->
+                    wakeOrFail(url) { getString(R.string.error_server_status, request.url.host ?: url, status) }
             }
         }
 
@@ -511,12 +564,15 @@ class MainActivity : ComponentActivity() {
             view.updatePadding(bottom = ime.bottom)
             val safe = insets.getInsets(bars)
             safeInsets = Insets.of(safe.left, safe.top, safe.right, max(0, safe.bottom - ime.bottom))
-            val spinnerStart = safe.top
-            swipe.setProgressViewOffset(false, spinnerStart, spinnerStart + (64 * resources.displayMetrics.density).toInt())
             webView?.let(::injectInsets)
             insets.inset(0, 0, 0, ime.bottom)
         }
-        for (panel in listOf(errorPanel, setupPanel)) {
+        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.update_holder)) { view, insets ->
+            val safe = insets.getInsets(bars)
+            view.setPadding(safe.left, 0, safe.right, safe.bottom)
+            insets
+        }
+        for (panel in listOf(errorPanel, setupPanel, wakingPanel)) {
             ViewCompat.setOnApplyWindowInsetsListener(panel) { view, insets ->
                 val safe = insets.getInsets(bars)
                 view.setPadding(safe.left, safe.top, safe.right, safe.bottom)
@@ -560,6 +616,11 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         const val ACTION_SERVER_SETTINGS = "com.jiiro.learnharness.action.SERVER_SETTINGS"
+        const val ACTION_RELOAD = "com.jiiro.learnharness.action.RELOAD"
+        const val ACTION_CHECK_UPDATES = "com.jiiro.learnharness.action.CHECK_UPDATES"
         const val STATE_WEB = "web"
+
+        /** Load errors a cold-starting server causes; others (DNS, TLS, bad URL) fail at once. */
+        val TRANSIENT_ERRORS = setOf(WebViewClient.ERROR_TIMEOUT, WebViewClient.ERROR_CONNECT, WebViewClient.ERROR_IO)
     }
 }

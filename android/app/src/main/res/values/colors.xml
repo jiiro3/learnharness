@@ -2,6 +2,11 @@
 <resources>
     <!-- The web app's background color; the WebView shows it before the page paints. -->
     <color name="lh_web_background">#141414</color>
+    <color name="lh_waking_text">#E6E6E6</color>
+    <!-- The web app's raised surface and edge colors. -->
+    <color name="lh_update_background">#1C1C1C</color>
+    <color name="lh_update_edge">#434343</color>
+    <color name="lh_update_secondary">#A3A3A3</color>
     <color name="lh_icon_background">#141414</color>
     <color name="lh_icon_ring">#949494</color>
     <color name="lh_background">#FFFFFF</color>

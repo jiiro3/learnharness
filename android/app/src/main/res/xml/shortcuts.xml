@@ -1,6 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Long-press the launcher icon to change the server URL or token. -->
+<!-- Long-press the launcher icon: reload the page, check for an app update, or change the
+     server URL or token. -->
 <shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_reload"
+        android:shortcutId="reload"
+        android:shortcutLongLabel="@string/reload"
+        android:shortcutShortLabel="@string/reload">
+        <intent
+            android:action="com.jiiro.learnharness.action.RELOAD"
+            android:targetClass="com.jiiro.learnharness.MainActivity"
+            android:targetPackage="com.jiiro.learnharness" />
+    </shortcut>
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_update"
+        android:shortcutId="check_updates"
+        android:shortcutLongLabel="@string/check_updates"
+        android:shortcutShortLabel="@string/check_updates_short">
+        <intent
+            android:action="com.jiiro.learnharness.action.CHECK_UPDATES"
+            android:targetClass="com.jiiro.learnharness.MainActivity"
+            android:targetPackage="com.jiiro.learnharness" />
+    </shortcut>
     <shortcut
         android:enabled="true"
         android:icon="@drawable/ic_shortcut_settings"

@@ -55,39 +55,6 @@ object WebScripts {
         })();
     """.trimIndent()
 
-    /** Name of the androidx.webkit message listener object for the pull-to-refresh guard. */
-    const val PULL_BRIDGE = "lhAndroidPull"
-
-    /**
-     * Document-start script for pull-to-refresh. The page never scrolls the document (all
-     * scrolling is in inner containers), so the WebView's own scrollY can't tell whether a pull
-     * should refresh. On each single-finger touchstart this reports "1" when neither the touched
-     * element nor any ancestor (crossing shadow roots) is scrolled down, else "0".
-     */
-    val PULL_GUARD = """
-        (function () {
-          if (window.__lhPullGuard) return;
-          window.__lhPullGuard = true;
-          function parent(e) {
-            if (e.parentElement) return e.parentElement;
-            var root = e.getRootNode ? e.getRootNode() : null;
-            return root && root.host ? root.host : null;
-          }
-          function atTop(target) {
-            for (var e = target instanceof Element ? target : null; e; e = parent(e)) {
-              if (e.scrollTop > 0) return false;
-            }
-            var doc = document.scrollingElement;
-            return !doc || doc.scrollTop <= 0;
-          }
-          window.addEventListener('touchstart', function (ev) {
-            var bridge = window.$PULL_BRIDGE;
-            if (!bridge) return;
-            bridge.postMessage(ev.touches.length === 1 && atTop(ev.target) ? '1' : '0');
-          }, { capture: true, passive: true });
-        })();
-    """.trimIndent()
-
     /**
      * Fallback for CSS env(safe-area-inset-*): the same insets, in CSS px, as custom properties
      * `--lh-safe-area-inset-{top,right,bottom,left}` on `<html>`'s inline style, which the phone
