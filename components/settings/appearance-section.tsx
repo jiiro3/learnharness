@@ -9,7 +9,8 @@
  * raised/accent/edge palette in code (components/settings/appearance.tsx).
  * Mode is dark-only this wave: control rendered DISABLED with a note — the
  * light palette is the design wave's work, and a lying control is worse
- * than an honest disabled one.
+ * than an honest disabled one. On phone the row is hidden (it has nothing
+ * to offer there yet).
  *
  * Graph graying (owner, 2026-09-20) follows the graph viewer's render-panel
  * convention: the whole row dims when a parent is off (stored values
@@ -186,7 +187,7 @@ export function AppearanceSection({
 
 	return (
 		<>
-			<SettingsRow label="Mode" hint="Coming soon" testid="row-mode" dimmed>
+			<SettingsRow label="Mode" hint="Coming soon" testid="row-mode" dimmed hideOnPhone>
 				<ThinSelect value="dark" ariaLabel="mode" onChange={() => {}} testid="select-mode" disabled>
 					<option value="dark">Dark</option>
 				</ThinSelect>
