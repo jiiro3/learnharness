@@ -69,6 +69,25 @@ function outcomeLabel(outcome: string): string {
 	return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
+/** One chosen option as text: the OptionAnswer's label (current records),
+ *  or the bare string old records stored. Anything else renders nothing. */
+function answerLabel(answer: unknown): string | undefined {
+	if (typeof answer === "string") return answer.trim() || undefined;
+	if (answer !== null && typeof answer === "object") {
+		const { label, index } = answer as { label?: unknown; index?: unknown };
+		if (typeof label === "string" && label.trim()) return label.trim();
+		if (typeof index === "number") return `option ${index}`;
+	}
+	return undefined;
+}
+
+/** The learner's reasoning on the question: `thinking`, or the pre-rename
+ *  `note` on old records. */
+function learnerThinking(out: { thinking?: unknown; note?: unknown } | undefined): string | undefined {
+	const raw = typeof out?.thinking === "string" && out.thinking.trim() ? out.thinking : out?.note;
+	return typeof raw === "string" && raw.trim() ? raw.trim() : undefined;
+}
+
 /** One tool result's learner-visible outcome, rendered as body lines. */
 function toolResultBody(result: ToolResultMessage, ctx?: MarkdownContext): { heading: string; body: string[] } {
 	const out = result.details as
@@ -76,9 +95,12 @@ function toolResultBody(result: ToolResultMessage, ctx?: MarkdownContext): { hea
 				questionText: string;
 				correct: boolean;
 				dontKnow: boolean;
+				thinking: string;
+				/** @deprecated pre-rename key (2026-10-03); old records still carry it. */
 				note: string;
 				text: string;
-				answers: string[];
+				/** OptionAnswer records ({index, label, value}); pre-2026 records stored bare strings. */
+				answers: Array<string | { index?: number; label?: string }>;
 				other: string;
 				dismissed: boolean;
 		  }>
@@ -105,7 +127,8 @@ function toolResultBody(result: ToolResultMessage, ctx?: MarkdownContext): { hea
 		else if (out?.correct === true) body.push("The learner answered correctly.");
 		else if (out?.correct === false) body.push("The learner answered incorrectly.");
 		else if (typeof out?.text === "string" && out.text.trim()) body.push(`The learner answered in his own words: ${out.text.trim()}`);
-		if (typeof out?.note === "string" && out.note) body.push(`*(his thinking: ${out.note})*`);
+		const thinking = learnerThinking(out);
+		if (thinking !== undefined) body.push(`*(the learner's thinking: ${thinking})*`);
 		return { heading, body };
 	}
 
@@ -136,13 +159,14 @@ function toolResultBody(result: ToolResultMessage, ctx?: MarkdownContext): { hea
 		const question = typeof out?.questionText === "string" && out.questionText ? out.questionText : "(no question text)";
 		const body = [`**Q:** ${question}`];
 		const chosen = [
-			...(Array.isArray(out?.answers) ? out!.answers! : []),
+			...(Array.isArray(out?.answers) ? out!.answers!.map(answerLabel).filter((a): a is string => a !== undefined) : []),
 			...(typeof out?.other === "string" && out.other.trim() ? [out.other.trim()] : []),
 		];
 		if (typeof out?.text === "string" && out.text.trim()) body.push(`The learner answered: ${out.text.trim()}`);
 		else if (chosen.length > 0) body.push(`The learner chose: ${chosen.join(", ")}`);
 		else if (out?.dismissed === true) body.push("The learner skipped this question.");
-		if (typeof out?.note === "string" && out.note) body.push(`*(his thinking: ${out.note})*`);
+		const thinking = learnerThinking(out);
+		if (thinking !== undefined) body.push(`*(the learner's thinking: ${thinking})*`);
 		return { heading: "Question", body };
 	}
 
