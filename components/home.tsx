@@ -14,6 +14,7 @@ import { SidebarToggle } from "@/components/sidebar";
 import { StatsBar } from "@/components/stats-bar";
 import { isPhoneNow, useIsPhone } from "@/components/phone";
 import { enterSends } from "@/components/enter-submits";
+import { SendFailureNotice } from "@/components/composer";
 import type { TurnUsage } from "@/src/core";
 
 /**
@@ -101,6 +102,7 @@ export function Home({
 	 *  the composer opens the picker; the picks seed the opening prompt).
 	 *  Not enforcing any input format — the picks are a convenience. */
 	const [mode, setMode] = useState<"teach" | "practice">("teach");
+	const [startFailed, setStartFailed] = useState(false);
 	const [practiceProps, setPracticeProps] = useState<{ id: string; name: string; statement: string }[]>([]);
 	const [chainSelectOpen, setChainSelectOpen] = useState(false);
 	// The chain table is CONTROLLED off this id set (the lifted pick).
@@ -139,6 +141,7 @@ export function Home({
 			return;
 		}
 		setBusy(true);
+		setStartFailed(false);
 		try {
 			// The map context (owner, 2026-10-04): picks in EITHER mode ride
 			// the CREATION as graphContext — the server writes a
@@ -161,6 +164,9 @@ export function Home({
 			router.push(`/chat/${id}?prompt=${encodeURIComponent(t)}`);
 		} catch {
 			setBusy(false);
+			// Phone (fork: mobile-layout): a failed start says so, with Retry
+			// (the topic stays in the field). Desktop unchanged.
+			if (isPhoneNow()) setStartFailed(true);
 		}
 	};
 
@@ -249,6 +255,7 @@ export function Home({
 							)
 						)}
 					/>
+					{startFailed && <SendFailureNotice retrying={busy} onRetry={start} />}
 					<form
 						className="flex items-end gap-1.5 rounded-2xl border bg-card p-1.5 shadow-lg"
 					onSubmit={(e) => {

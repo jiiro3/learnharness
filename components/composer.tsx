@@ -162,3 +162,28 @@ export function Composer({
 		</form>
 	);
 }
+
+/** THE SEND-FAILURE NOTICE (fork: mobile-layout, phone): a send that
+ *  failed on the connection shows one friendly line + Retry above the
+ *  field, instead of a raw "Failed to fetch" (or nothing at all). Pure,
+ *  SSR-pinnable; the caller owns the retry and when it shows. */
+export function SendFailureNotice({ retrying, onRetry }: { retrying: boolean; onRetry: () => void }) {
+	return (
+		<div
+			role="alert"
+			data-testid="send-failure"
+			className="pointer-events-auto mb-2 flex items-center gap-3 rounded-xl border border-destructive/40 bg-destructive/10 py-1.5 pl-3 pr-1.5 text-sm"
+		>
+			<span className="min-w-0 flex-1">Couldn&apos;t connect. Check your connection and try again.</span>
+			<button
+				type="button"
+				data-testid="send-failure-retry"
+				disabled={retrying}
+				onClick={onRetry}
+				className="flex h-11 shrink-0 items-center rounded-lg border border-border bg-card px-4 font-medium transition-colors hover:bg-accent disabled:opacity-60"
+			>
+				{retrying ? "Retrying…" : "Retry"}
+			</button>
+		</div>
+	);
+}

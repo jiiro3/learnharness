@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Conversation, ConversationContent, ConversationEmptyState } from "@/components/ai-elements/conversation";
-import { Composer } from "@/components/composer";
+import { Composer, SendFailureNotice } from "@/components/composer";
+import { isPhoneNow, useIsPhone } from "@/components/phone";
 import { DictationBar, joinDictation, useDictation } from "@/components/dictation";
 import { useFieldCycle } from "@/components/field-cycle";
 import { SidebarToggle } from "@/components/sidebar";
@@ -84,6 +85,7 @@ export function DraftShell({
 	onOpenPicker,
 	onClearPicks,
 	overlay,
+	startFailed = false,
 }: {
 	busy: boolean;
 	text: string;
@@ -110,7 +112,11 @@ export function DraftShell({
 	 *  the graph view (the overlay fills its column, never the sidebar).
 	 *  Passed as a node so the pick state stays in NewSession. */
 	overlay?: ReactNode;
+	/** Phone (fork: mobile-layout): the last start failed on the
+	 *  connection — the notice + Retry show above the composer. */
+	startFailed?: boolean;
 }) {
+	const phone = useIsPhone();
 	// Voice dictation (STT wave, 2026-09-17): finals append at the end of the
 	// draft text (via the parent's onChange — the truth lives there); the
 	// strip lives in the stats bar's middle slot.
@@ -142,6 +148,12 @@ export function DraftShell({
 	/* Run end focuses the composer (owner, 2026-10-01): the hands are on
 	 * the keyboard from the stop — falling edge of `active` only. */
 	const composerInputRef = useRef<HTMLTextAreaElement>(null);
+	// Phone (fork: mobile-layout): no autofocus, like home — the hydration
+	// pass renders the desktop tree (autoFocus on); undo that focus once
+	// so the soft keyboard never opens unasked.
+	useEffect(() => {
+		if (isPhoneNow() && document.activeElement === composerInputRef.current) composerInputRef.current?.blur();
+	}, []);
 	const dictationWasActiveRef = useRef(false);
 	useEffect(() => {
 		if (dictation.active) {
@@ -191,6 +203,7 @@ export function DraftShell({
 									)}
 									setup={setupCta}
 								/>
+								{startFailed && <SendFailureNotice retrying={busy} onRetry={handleSend} />}
 								<div className="pointer-events-auto overflow-hidden rounded-2xl border bg-card shadow-lg">
 									<Composer
 										busy={busy}
@@ -200,7 +213,7 @@ export function DraftShell({
 										onStop={() => {}}
 										canSend={canSend}
 										inputRef={composerInputRef}
-										autoFocus
+										autoFocus={!phone}
 										onEscape={dictation.active ? dictation.cancel : undefined}
 										// The opening question, same as the graph view's new-session
 										// input (owner refinement round, 2026-09-24) — no lesson has
@@ -245,6 +258,7 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 		setText(v);
 	};
 	const [busy, setBusy] = useState(false);
+	const [startFailed, setStartFailed] = useState(false);
 	// THE PICK BAR (owner round 10): the draft's lifted pick set + the
 	// snapshot the standalone chain-table picker reads. Lazy — the graph
 	// is fetched on FIRST open only, then reused.
@@ -304,12 +318,18 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 			return;
 		}
 		setBusy(true);
+		setStartFailed(false);
 		void startDraftSession(draft, fetch, mode === "practice" ? "practice" : undefined, mode === "practice" ? picksRef.current : undefined)
 			.then((target) => {
 				if (target) router.push(target);
 				else setBusy(false);
 			})
-			.catch(() => setBusy(false));
+			.catch(() => {
+				setBusy(false);
+				// Phone (fork: mobile-layout): say so, with Retry; the draft
+				// stays in the composer. Desktop unchanged.
+				if (isPhoneNow()) setStartFailed(true);
+			});
 	}, [busy, router, configured, zeroKeys, strongKeyless]);
 
 	return (
@@ -323,6 +343,7 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 				picks={picks}
 				onOpenPicker={openPicker}
 				onClearPicks={() => applyPicks([])}
+				startFailed={startFailed}
 				overlay={
 					// THE PICKER (owner round 10b): hosted INSIDE the content
 					// column — absolute inset-0 resolves to the column's relative

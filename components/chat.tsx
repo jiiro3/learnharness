@@ -22,7 +22,7 @@ import { Separator } from "@/components/ui/separator";
 import { AnsweredCard } from "@/components/answered-card";
 import { artifactRenderers } from "@/components/artifacts";
 import { SubagentSteerCard } from "@/components/artifacts/steer-card";
-import { Composer } from "@/components/composer";
+import { Composer, SendFailureNotice } from "@/components/composer";
 import { useEnterSubmits } from "@/components/enter-submits";
 import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { dockStateKey } from "@/components/dock-state-key";
@@ -65,7 +65,7 @@ import {
 	type CompactionDividerData,
 } from "@/components/compaction-divider";
 import { CoverageRing } from "@/components/extraction-coverage";
-import { isPhoneNow } from "@/components/phone";
+import { isPhoneNow, useIsPhone } from "@/components/phone";
 import {
 	activeProblemOf,
 	dismissedAnswer,
@@ -242,6 +242,12 @@ export function Chat({
 	const { messages, nativeMessages, contextTokens, send, continueIfOwed, steer, steerQueue, submitAnswer, dismissQuestion, dismissProblem, questionDraft, saveQuestionDraft, setMessages, adoptRecord, status, error, stop, clearError, resumeStream, setReattachSettled } =
 		useChatSession({ chatId, initialMessages, initialError, initiallyInFlight });
 
+	const phone = useIsPhone();
+	// The last input this page sent (the send-failure notice's retry seam,
+	// fork: mobile-layout) and the native record length it was sent at.
+	const lastInputRef = useRef<SentInput | null>(null);
+	const nativeRef = useRef(nativeMessages);
+	nativeRef.current = nativeMessages;
 	const sessionFindScopeRef = useRef<HTMLDivElement | null>(null);
 	const scrollContextRef = useRef<StickToBottomContext | null>(null);
 	const sourceTextParts = useMemo(() => firstSourceTextParts(messages), [messages]);
@@ -255,6 +261,7 @@ export function Chat({
 	useEffect(() => {
 		if (!sentInitial.current && initialPromptOwed(initialMessages, initialPrompt)) {
 			sentInitial.current = true;
+			lastInputRef.current = { type: "text", text: initialPrompt!.trim(), at: initialMessages.length };
 			void send({ type: "text", text: initialPrompt! });
 		}
 	}, [initialPrompt, initialMessages, send]);
@@ -492,6 +499,7 @@ export function Chat({
 		(text: string) => {
 			const problem = activeProblemRef.current;
 			if (!problem) return;
+			lastInputRef.current = { type: "thinking", problemCallId: problem.toolCallId, text, at: nativeRef.current.length };
 			void send({ type: "thinking", problemCallId: problem.toolCallId, text });
 		},
 		[send],
@@ -704,6 +712,7 @@ export function Chat({
 		);
 	const sendNext = useCallback(() => {
 		if (!nextReady) return;
+		lastInputRef.current = { type: "next", at: nativeRef.current.length };
 		void send({ type: "next" });
 	}, [nextReady, send]);
 
@@ -1148,6 +1157,7 @@ export function Chat({
 		if (!t) return;
 		draftRef.current = t; // the refusal flow's preserve-and-replay seam
 		applyText("");
+		lastInputRef.current = { type: "text", text: t, at: nativeRef.current.length };
 		void send({ type: "text", text: t });
 	};
 
@@ -1166,10 +1176,114 @@ export function Chat({
 		if (!t) return;
 		if (busy) {
 			applyText("");
+			lastInputRef.current = { type: "steer", text: t, at: nativeRef.current.length };
 			void steer(t);
 			return;
 		}
 		doSend();
+	};
+
+	/* THE SEND-FAILURE NOTICE (fork: mobile-layout — phone only; desktop
+	 * keeps the transcript banner as it was). A send that fails on the
+	 * CONNECTION (offline, "Failed to fetch", a dropped stream) shows one
+	 * friendly line with Retry above the dock instead of the raw banner
+	 * buried in the transcript. The typed text is kept: a failed composer
+	 * send or steer goes back into the composer (its optimistic bubble is
+	 * hidden meanwhile); a failed answer keeps its form (the session model
+	 * restores the draft); a failed practice submission keeps its card.
+	 * The notice dies with the error: the next send clears it at start,
+	 * and so does the turn's first event. */
+	const online = typeof navigator === "undefined" || navigator.onLine !== false;
+	const netFailure = phone && error !== null && isNetworkFailure(error.message, online);
+	const [unsentIds, setUnsentIds] = useState<ReadonlySet<string>>(() => new Set());
+	const [retrying, setRetrying] = useState(false);
+	const steerQueueRef = useRef(steerQueue);
+	steerQueueRef.current = steerQueue;
+	// Accepted = the turn got going (its first event flipped streaming):
+	// a later connection drop must not hand the text back for a resend.
+	const acceptedRef = useRef<SentInput | null>(null);
+	useEffect(() => {
+		if (status === "streaming") acceptedRef.current = lastInputRef.current;
+	}, [status]);
+	const keptRef = useRef<SentInput | null>(null);
+	useEffect(() => {
+		if (!netFailure) return;
+		const f = lastInputRef.current;
+		if (!f || keptRef.current === f || acceptedRef.current === f) return;
+		keptRef.current = f;
+		if (f.type !== "text" && f.type !== "steer") return;
+		// A steer still queued (or already drained into the transcript) was
+		// delivered; only a dropped one failed.
+		if (f.type === "steer" && (steerQueueRef.current.some((q) => q.text === f.text) || inputLanded(f, nativeRef.current.slice(f.at)))) return;
+		if (textRef.current.trim() === "") applyText(f.text);
+		// The orphan bubble is a local copy (c_ id) the server's copy never
+		// reuses: hiding it for good is safe, and the next record sync drops it.
+		const orphan = orphanTextSend(f, nativeRef.current);
+		if (orphan) setUnsentIds((prev) => new Set(prev).add(orphan));
+	}, [netFailure, applyText]);
+	const retryFailedSend = async () => {
+		if (retrying) return;
+		const f = lastInputRef.current;
+		// An answer: re-submit the dock's CURRENT form (the learner may have
+		// changed it since); the session model checks the record first.
+		if (f?.type === "answer") {
+			const form = document.querySelector<HTMLFormElement>('[data-testid="question-dock"] form');
+			if (form) form.requestSubmit();
+			else submitAnswer(f.tool, f.toolCallId, f.output);
+			return;
+		}
+		// A turn is live (a failed steer): steer again — no record swap
+		// mid-stream (the snapshot law); the running turn drains it.
+		if (busyRef.current && (f?.type === "text" || f?.type === "steer")) {
+			const t = textRef.current.trim() || f.text;
+			clearError();
+			applyText("");
+			lastInputRef.current = { type: "steer", text: t, at: nativeRef.current.length };
+			void steer(t);
+			return;
+		}
+		setRetrying(true);
+		try {
+			// Heal first: the record says whether the input landed after all
+			// (a lost acknowledgement) and drops the stale optimistic copies.
+			let record: { messages?: LhMessage[]; turnInFlight?: boolean; turnError?: string };
+			try {
+				const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}`);
+				if (!res.ok) return;
+				record = (await res.json()) as typeof record;
+			} catch {
+				return; // still unreachable: the notice stays
+			}
+			if (!Array.isArray(record.messages)) return;
+			clearError();
+			setMessages(record.messages, record.turnError);
+			if (record.turnInFlight) {
+				attachToRunningTurn();
+				return;
+			}
+			const len = record.messages.length;
+			const since = record.messages.slice(f && f.at <= len ? f.at : Math.max(0, len - 4));
+			if (!f || inputLanded(f, since)) {
+				if (f && (f.type === "text" || f.type === "steer") && textRef.current.trim() === f.text) applyText("");
+				continueIfOwed(record.messages);
+				return;
+			}
+			if (f.type === "text" || f.type === "steer") {
+				const t = textRef.current.trim() || f.text;
+				draftRef.current = t;
+				applyText("");
+				lastInputRef.current = { type: "text", text: t, at: len };
+				void send({ type: "text", text: t });
+			} else if (f.type === "thinking") {
+				lastInputRef.current = { ...f, at: len };
+				void send({ type: "thinking", problemCallId: f.problemCallId, text: f.text });
+			} else if (f.type === "next") {
+				lastInputRef.current = { ...f, at: len };
+				void send({ type: "next" });
+			}
+		} finally {
+			setRetrying(false);
+		}
 	};
 
 	return (
@@ -1335,7 +1449,9 @@ export function Chat({
 							)}
 
 							{messages.map((m, mi) =>
-								m.role === "user" && isSubagentSteer(m) ? (
+								// A failed text send waiting in the composer again
+								// (the send-failure notice): its bubble is hidden.
+								unsentIds.has(m.id) ? null : m.role === "user" && isSubagentSteer(m) ? (
 									// Sub-agent delivery (wake-pipeline steer): NO message bubble — the
 									// artifact card sits in the transcript column directly, full width
 									// and centered like the teacher's artifacts (contracts.ts "THE ASYNC
@@ -1582,7 +1698,7 @@ export function Chat({
 									</Shimmer>
 								</span>
 							)}
-							{error && (
+							{error && !netFailure && (
 								<div className="rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm">
 									Something went wrong: {error.message}
 								</div>
@@ -1623,6 +1739,7 @@ export function Chat({
 					dictationSlot={<DictationBar dictation={dictation} />}
 					dictationCancel={dictation.cancel}
 					queuedSteers={visibleQueuedSteers(steerQueue, nativeMessages)}
+					sendFailure={netFailure ? <SendFailureNotice retrying={retrying} onRetry={() => void retryFailedSend()} /> : undefined}
 					setupCta={
 						zeroKeys ? (
 							<ZeroKeysPill onOpen={() => setSetupOpen(true)} />
@@ -1677,7 +1794,9 @@ export function Chat({
 						const reading = readingThinkingRef.current.trim() || undefined;
 						// The pending-id effect clears this only when the question
 						// actually leaves. An offline preflight keeps the draft visible.
-						submitAnswer(pending.tool, pending.toolCallId, reading ? { ...output, readingThinking: reading } : output);
+						const answer = reading ? { ...output, readingThinking: reading } : output;
+						lastInputRef.current = { type: "answer", tool: pending.tool, toolCallId: pending.toolCallId, output: answer, at: nativeRef.current.length };
+						submitAnswer(pending.tool, pending.toolCallId, answer);
 					}}
 				/>
 				</Conversation>
@@ -1776,6 +1895,72 @@ export function initialPromptOwed(messages: readonly { role: string }[], prompt:
 	return !messages.some((m) => m.role === "user" || m.role === "assistant");
 }
 
+/**
+ * THE SEND-FAILURE NOTICE (fork: mobile-layout). An input the page sent
+ * (composer text, a steer, a practice submission, the next-problem
+ * signal, an answer), remembered so a failed send can be retried and its
+ * typed text kept. `at` is the native message count when it was sent
+ * (the record slice a retry searches for a lost acknowledgement).
+ */
+export type SentInput =
+	| { type: "text"; text: string; at: number }
+	| { type: "steer"; text: string; at: number }
+	| { type: "thinking"; problemCallId: string; text: string; at: number }
+	| { type: "next"; at: number }
+	| { type: "answer"; tool: string; toolCallId: string; output: QuestionAnswerData; at: number };
+
+/** A failure that is the connection's, not the server's or the model's:
+ *  the browser's fetch TypeError texts (Chromium, Firefox, Safari, undici),
+ *  the stream-drop notice, or the browser reporting itself offline. */
+export function isNetworkFailure(message: string | undefined, online = true): boolean {
+	if (!online) return true;
+	if (!message) return false;
+	return /failed to fetch|networkerror|network error|load failed|fetch failed|err_internet_disconnected|err_network|the connection dropped/i.test(
+		message,
+	);
+}
+
+function userText(m: LhMessage): string | null {
+	const msg = m as { role?: string; content?: unknown };
+	if (msg.role !== "user") return null;
+	if (typeof msg.content === "string") return msg.content;
+	if (!Array.isArray(msg.content)) return null;
+	return (msg.content as Array<{ type?: string; text?: string }>)
+		.filter((b) => b.type === "text")
+		.map((b) => b.text ?? "")
+		.join("");
+}
+
+/** Did a failed input actually land (a lost acknowledgement)? Searched in
+ *  the record slice since it was sent. Answers are not judged here: the
+ *  session model's recovering send checks the record for those itself. */
+export function inputLanded(input: SentInput, since: readonly LhMessage[]): boolean {
+	switch (input.type) {
+		case "text":
+		case "steer":
+			return since.some((m) => userText(m)?.trim() === input.text);
+		case "thinking":
+			return since.some((m) => {
+				const c = m as { customType?: string; details?: { problemCallId?: string; text?: string } };
+				return c.customType === "practice-thinking" && c.details?.problemCallId === input.problemCallId && c.details?.text === input.text;
+			});
+		case "next":
+			return since.some((m) => (m as { customType?: string }).customType === "practice-next");
+		case "answer":
+			return false;
+	}
+}
+
+/** The local optimistic copy of a failed text send (its local c_ id), so
+ *  the page can hide it while the text waits in the composer again. */
+export function orphanTextSend(input: SentInput, native: readonly LhMessage[]): string | null {
+	if (input.type !== "text") return null;
+	const hit = native
+		.slice(input.at)
+		.find((m) => String((m as { id?: string }).id ?? "").startsWith("c_") && userText(m)?.trim() === input.text);
+	return hit ? String((hit as { id?: string }).id) : null;
+}
+
 export function escAbortTarget(s: {
 	abortAsk: boolean;
 	mermaidFocus: boolean;
@@ -1870,6 +2055,7 @@ function DockOverlay({
 	dictationCancel,
 	setupCta,
 	queuedSteers,
+	sendFailure,
 }: {
 	pending: ReturnType<typeof findPendingToolCall>;
 	initialQuestionDraft?: QuestionFormDraft;
@@ -1916,6 +2102,8 @@ function DockOverlay({
 	/** The queued-steer indicator's lines (composer steering, 2026-10-03):
 	 *  already filtered by visibleQueuedSteers — only undrained steers. */
 	queuedSteers: QueuedSteerLine[];
+	/** The send-failure notice (phone): above the dock shell, always in view. */
+	sendFailure?: React.ReactNode;
 	/** The persistent setup CTA (BYOK, owner 2026-09-22): the same pill
 	 *  home and /chat/new carry, above the composer while slots are unset. */
 	setupCta?: React.ReactNode;
@@ -2318,6 +2506,7 @@ function DockOverlay({
 					    rounding starts, truncated, no background, no container. A
 					    line dies when its card lands (visibleQueuedSteers). */}
 					<QueuedSteersBody steers={queuedSteers} />
+					{sendFailure}
 					{/* The reading-thinking field (owner 2026-10-03): mounted while a
 					    teach-phase check waits — the same cue that collapses it. It
 					    claims dictated speech until the learner reveals the check
