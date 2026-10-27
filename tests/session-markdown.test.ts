@@ -107,7 +107,7 @@ describe("messageMarkdown", () => {
 			"r1",
 		)!;
 		assert.match(md, /^### Recall check · r1$/m);
-		assert.match(md, /The learner answered in his own words: it never strays far/);
+		assert.match(md, /The learner answered in their own words: it never strays far/);
 	});
 
 	it("probe-phase questions export under their own names (owner, 2026-10-09)", () => {

@@ -126,7 +126,7 @@ function toolResultBody(result: ToolResultMessage, ctx?: MarkdownContext): { hea
 		else if (out?.dontKnow === true) body.push("The learner did not know.");
 		else if (out?.correct === true) body.push("The learner answered correctly.");
 		else if (out?.correct === false) body.push("The learner answered incorrectly.");
-		else if (typeof out?.text === "string" && out.text.trim()) body.push(`The learner answered in his own words: ${out.text.trim()}`);
+		else if (typeof out?.text === "string" && out.text.trim()) body.push(`The learner answered in their own words: ${out.text.trim()}`);
 		const thinking = learnerThinking(out);
 		if (thinking !== undefined) body.push(`*(the learner's thinking: ${thinking})*`);
 		return { heading, body };
