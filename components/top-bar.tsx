@@ -40,21 +40,27 @@
 
 import type { ReactNode } from "react";
 import { SidebarToggle } from "@/components/sidebar";
+import { PhoneBackButton } from "@/components/bottom-nav";
 
 export function TopBar({
 	drag = true,
+	phoneBack = false,
 	onMouseDown,
 	children,
 }: {
 	drag?: boolean;
+	/** Phone layout (fork: mobile-layout): lead with a back button — the
+	 *  surface is a full-screen page with no sidebar to reopen. */
+	phoneBack?: boolean;
 	onMouseDown?: React.MouseEventHandler<HTMLElement>;
 	children?: ReactNode;
 }) {
 	return (
 		<header
 			onMouseDown={onMouseDown}
-			className={`${drag ? "lh-drag " : ""}lh-wco-gutter flex h-15 select-none items-center gap-3 border-b border-border px-3`}
+			className={`${drag ? "lh-drag " : ""}lh-wco-gutter flex h-15 select-none items-center gap-3 border-b border-border px-3 phone:h-14 phone:gap-2 phone:px-2`}
 		>
+			{phoneBack && <PhoneBackButton />}
 			<SidebarToggle />
 			{children}
 		</header>

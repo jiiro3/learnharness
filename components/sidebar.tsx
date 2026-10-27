@@ -22,6 +22,8 @@ import { useServerEvent, useServerResync } from "@/components/server-events";
 import type { ChatListItem } from "@/src/core";
 import { kbdEventForAction } from "@/src/core";
 import { notifySettingsSaved } from "@/components/settings-signal";
+import { useIsPhone, useVisualViewportVars } from "@/components/phone";
+import { BottomNav } from "@/components/bottom-nav";
 
 /**
  * Toggleable sidebar — NOT a modal drawer: no backdrop, no focus theft. It
@@ -103,6 +105,12 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 	const [open, setOpen] = useState(false);
 	const [narrow, setNarrow] = useState(false);
 	const [mounted, setMounted] = useState(false);
+	// The phone layout (fork: mobile-layout) has no sidebar at all — the
+	// bottom tabs replace it — so it reads as CLOSED there, exactly like
+	// the narrow-window auto-close: the persisted preference is untouched
+	// and the desktop layout gets it back the moment the gate lifts.
+	const phone = useIsPhone();
+	useVisualViewportVars(phone);
 
 	useEffect(() => {
 		// Electron shell detection (merged chrome, 2026-09-17): keys the
@@ -176,9 +184,21 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 	}, [toggle]);
 
 	return (
-		<SidebarContext.Provider value={{ open: open && !narrow, toggle }}>
-			{/* transitions gated on mount: no slide-in flash on page load */}
-			<div className={cn("flex h-dvh", mounted && "[&_.sidebar-motion]:transition-[width,margin,opacity]")}>{children}</div>
+		<SidebarContext.Provider value={{ open: open && !narrow && !phone, toggle }}>
+			{/* transitions gated on mount: no slide-in flash on page load.
+			    Phone (fork: mobile-layout): the shell pins to the VISUAL
+			    viewport (fixed, its height and offset published by
+			    useVisualViewportVars) so the dock rides above the soft
+			    keyboard, pads by the safe-area insets, and stacks the page
+			    over the bottom tabs. */}
+			<div
+				className={cn(
+					"flex h-dvh phone:fixed phone:inset-x-0 phone:top-(--lh-vv-top) phone:h-(--lh-vv-h) phone:flex-col phone:pt-(--lh-safe-top) phone:pr-(--lh-safe-right) phone:pl-(--lh-safe-left)",
+					mounted && "[&_.sidebar-motion]:transition-[width,margin,opacity]",
+				)}
+			>
+				{children}
+			</div>
 		</SidebarContext.Provider>
 	);
 }
@@ -200,7 +220,7 @@ export function SidebarToggle() {
 	return (
 		<span
 			className={cn(
-				"sidebar-motion lh-no-drag relative flex h-9 shrink-0 overflow-hidden duration-200",
+				"sidebar-motion lh-no-drag relative flex h-9 shrink-0 overflow-hidden duration-200 phone:hidden",
 				open ? "w-0 -mr-3" : "w-9 mr-0 lh-closed-toggle",
 			)}
 		>
@@ -305,7 +325,7 @@ export function SessionRow({
 			onContextMenu={onContextMenu}
 			data-testid={kbdSelected ? "session-row-kbd" : "session-row"}
 			className={cn(
-				"relative mb-0.5 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors hover:bg-accent",
+				"relative mb-0.5 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors hover:bg-accent phone:min-h-14 phone:py-3 phone:active:bg-accent",
 				active && "bg-accent",
 				kbdSelected && !active && "bg-accent/60 ring-1 ring-border",
 			)}
@@ -386,49 +406,46 @@ export function RenameRow({ chat, onCommit, onCancel }: { chat: ChatListItem; on
 export type SessionKindFilter = "teach" | "all" | "practice";
 const KIND_FILTER_KEY = "lh:session-kind-filter";
 
-function SessionsSidebar() {
-	const { open, toggle } = useSidebar();
+/** Commit a session rename (shared by the sidebar and the phone Sessions
+ *  screen): PUT the title, then lh:chat-renamed patches every listener.
+ *  Empty input discards; a failure keeps the old title. */
+export async function renameChat(id: string, next: string): Promise<void> {
+	const t = next.trim();
+	if (t === "") return;
+	try {
+		const res = await fetch(`/api/chats/${id}`, {
+			method: "PUT",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ title: t }),
+		});
+		if (!res.ok) throw new Error(`rename failed: ${res.status}`);
+		window.dispatchEvent(new CustomEvent("lh:chat-renamed", { detail: { id, title: t } }));
+	} catch (err) {
+		console.error("rename failed:", err); // keep the old title
+	}
+}
+
+/** Download a session's Markdown export (same-origin anchor; the route's
+ *  Content-Disposition names the file). */
+export function exportChatMarkdown(chatId: string): void {
+	const a = document.createElement("a");
+	a.href = `/api/chats/${chatId}/markdown`;
+	a.download = ""; // the route's filename wins
+	document.body.appendChild(a);
+	a.click();
+	a.remove();
+}
+
+/**
+ * The session-list snapshot + its freshness plumbing (fork: mobile-layout —
+ * extracted verbatim from SessionsSidebar so the phone Sessions screen
+ * shares one implementation): the /api/chats fetch, the same-tab instants
+ * (lh:chat-renamed, lh:turn-state) and the server-event subscriptions.
+ * The caller decides WHEN to call refresh (the sidebar: on open +
+ * navigation).
+ */
+export function useChatList() {
 	const [chats, setChats] = useState<ChatListItem[] | null>(null);
-	const [query, setQuery] = useState("");
-	const [kindFilter, setKindFilter] = useState<SessionKindFilter>("all");
-	useEffect(() => {
-		const stored = window.localStorage.getItem(KIND_FILTER_KEY);
-		if (stored === "teach" || stored === "all" || stored === "practice") setKindFilter(stored);
-	}, []);
-	const setFilter = useCallback((f: SessionKindFilter) => {
-		setKindFilter(f);
-		window.localStorage.setItem(KIND_FILTER_KEY, f);
-	}, []);
-	const pathname = usePathname();
-	const router = useRouter();
-	const { open: openSettings } = useSettingsDialog();
-
-	/* New session (owner, 2026-09-13): NO POST — the button opens the
-	   sessionless draft view; the session is created only when the first
-	   message is sent (and that message becomes its title). Search: a
-	   client-side filter over the poll snapshot — no server round trip. */
-	const newSession = useCallback(() => {
-		router.push("/chat/new");
-	}, [router]);
-
-	/* FUZZY (owner round 8, 2026-10-05): subsequence match ranked by
-	 * fuzzyScore — prefix beats word-boundary beats scattered. Empty query
-	 * keeps the natural list order (scores are all 0, sort is stable). */
-	const shown = useMemo(() => {
-		const q = query.trim();
-		let list = chats;
-		if (list && kindFilter !== "all") {
-			list = list.filter((c) => (c.kind ?? "teach") === kindFilter);
-		}
-		if (!list) return list;
-		if (!q) return list;
-		return list
-			.map((c) => ({ c, score: fuzzyScore(q, c.title) }))
-			.filter((r): r is { c: (typeof list)[number]; score: number } => r.score !== null)
-			.sort((a, b) => b.score - a.score)
-			.map((r) => r.c);
-	}, [chats, query, kindFilter]);
-
 	const refreshInFlightRef = useRef(false);
 	const refresh = useCallback(async () => {
 		// In-flight coalesce (S6): event bursts may land several refresh
@@ -520,6 +537,52 @@ function SessionsSidebar() {
 		},
 		[],
 	);
+	return { chats, setChats, refresh };
+}
+
+function SessionsSidebar() {
+	const { open, toggle } = useSidebar();
+	const { chats, setChats, refresh } = useChatList();
+	const [query, setQuery] = useState("");
+	const [kindFilter, setKindFilter] = useState<SessionKindFilter>("all");
+	useEffect(() => {
+		const stored = window.localStorage.getItem(KIND_FILTER_KEY);
+		if (stored === "teach" || stored === "all" || stored === "practice") setKindFilter(stored);
+	}, []);
+	const setFilter = useCallback((f: SessionKindFilter) => {
+		setKindFilter(f);
+		window.localStorage.setItem(KIND_FILTER_KEY, f);
+	}, []);
+	const pathname = usePathname();
+	const router = useRouter();
+	const { open: openSettings } = useSettingsDialog();
+
+	/* New session (owner, 2026-09-13): NO POST — the button opens the
+	   sessionless draft view; the session is created only when the first
+	   message is sent (and that message becomes its title). Search: a
+	   client-side filter over the poll snapshot — no server round trip. */
+	const newSession = useCallback(() => {
+		router.push("/chat/new");
+	}, [router]);
+
+	/* FUZZY (owner round 8, 2026-10-05): subsequence match ranked by
+	 * fuzzyScore — prefix beats word-boundary beats scattered. Empty query
+	 * keeps the natural list order (scores are all 0, sort is stable). */
+	const shown = useMemo(() => {
+		const q = query.trim();
+		let list = chats;
+		if (list && kindFilter !== "all") {
+			list = list.filter((c) => (c.kind ?? "teach") === kindFilter);
+		}
+		if (!list) return list;
+		if (!q) return list;
+		return list
+			.map((c) => ({ c, score: fuzzyScore(q, c.title) }))
+			.filter((r): r is { c: (typeof list)[number]; score: number } => r.score !== null)
+			.sort((a, b) => b.score - a.score)
+			.map((r) => r.c);
+	}, [chats, query, kindFilter]);
+
 
 	/* ── Keyboard seams (shortcut wave A, 2026-09-17; search-walk round
 	   2026-10-10) ── ⌘⇧F focuses the search field — and THE SEARCH OWNS THE
@@ -587,19 +650,7 @@ function SessionsSidebar() {
 	// it too). Esc discards; empty commit discards (the header's rules).
 	const commitRename = useCallback(async (id: string, next: string) => {
 		setRenamingId(null);
-		const t = next.trim();
-		if (t === "") return;
-		try {
-			const res = await fetch(`/api/chats/${id}`, {
-				method: "PUT",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ title: t }),
-			});
-			if (!res.ok) throw new Error(`rename failed: ${res.status}`);
-			window.dispatchEvent(new CustomEvent("lh:chat-renamed", { detail: { id, title: t } }));
-		} catch (err) {
-			console.error("rename failed:", err); // keep the old title
-		}
+		await renameChat(id, next);
 	}, []);
 
 	// Delete success: patch the list instantly (the poll is the backstop),
@@ -644,7 +695,7 @@ function SessionsSidebar() {
 
 	return (
 		<aside
-			className={cn("sidebar-motion shrink-0 overflow-hidden duration-200", open ? "w-72" : "w-0")}
+			className={cn("sidebar-motion shrink-0 overflow-hidden duration-200 phone:hidden", open ? "w-72" : "w-0")}
 			aria-hidden={!open}
 		>
 			<div className="flex h-full w-72 flex-col border-r bg-background">
@@ -900,12 +951,7 @@ function SessionsSidebar() {
 							onClick={() => {
 								const chatId = ctxChatId;
 								setCtxChatId(null);
-								const a = document.createElement("a");
-								a.href = `/api/chats/${chatId}/markdown`;
-								a.download = ""; // the route's filename wins
-								document.body.appendChild(a);
-								a.click();
-								a.remove();
+								exportChatMarkdown(chatId);
 							}}
 							className="flex items-center rounded-lg px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-accent"
 						>
@@ -944,7 +990,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 	return (
 		<SettingsDialogProvider>
 			<SessionsSidebar />
-			<main className="min-w-0 flex-1">{children}</main>
+			<main className="min-w-0 flex-1 phone:min-h-0">{children}</main>
+			{/* The phone tabs (fork: mobile-layout) — CSS-hidden off phone. */}
+			<BottomNav />
 			{/* The single document-level keydown listener (keyboard wave A) —
 			    after the content in the tree, but it's window-level so order only
 			    matters for the events it dispatches, never for DOM priority. */}

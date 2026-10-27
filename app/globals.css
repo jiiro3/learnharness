@@ -2,6 +2,19 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* THE PHONE LAYOUT (fork: mobile-layout). The CSS twin of PHONE_QUERY in
+   components/phone.ts — keep the two in sync. Below the Electron window
+   floor (640px), or a coarse pointer below 1024px; never inside the
+   Electron shell (.lh-electron, set after mount). Everything gated on
+   `phone:` is inert on desktop, so the desktop layout is untouched. */
+@custom-variant phone {
+	@media (max-width: 639.98px), (pointer: coarse) and (max-width: 1023.98px) {
+		&:where(:root:not(.lh-electron) *) {
+			@slot;
+		}
+	}
+}
+
 /*
  * THE SKIN — wave 5. Design tokens, the single place to restyle the app.
  *
@@ -597,4 +610,57 @@ body {
 	background-color: var(--accent);
 	outline: 1px solid var(--border);
 	border-radius: 0.25rem;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Phone shell (fork: mobile-layout). The visual-viewport variables are
+   published by useVisualViewportVars (components/phone.ts); until the
+   first measurement they fall back to the dynamic viewport. The safe-area
+   bottom inset drops to zero while the soft keyboard is up (it covers the
+   gesture bar). Nothing here applies outside the phone media query.
+   ───────────────────────────────────────────────────────────────────────── */
+:root {
+	--lh-vv-h: 100dvh;
+	--lh-vv-top: 0px;
+	/* env() first; the Android shell (LearnHarnessAndroid WebView) also
+	   publishes --lh-safe-area-inset-* as a fallback — the larger wins. */
+	--lh-safe-top: max(env(safe-area-inset-top, 0px), var(--lh-safe-area-inset-top, 0px));
+	--lh-safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--lh-safe-area-inset-bottom, 0px));
+	--lh-safe-left: max(env(safe-area-inset-left, 0px), var(--lh-safe-area-inset-left, 0px));
+	--lh-safe-right: max(env(safe-area-inset-right, 0px), var(--lh-safe-area-inset-right, 0px));
+}
+:root.lh-kb-open {
+	--lh-safe-bottom: 0px;
+}
+@media (max-width: 639.98px), (pointer: coarse) and (max-width: 1023.98px) {
+	:root:not(.lh-electron) {
+		/* The shell is pinned to the visual viewport; the document itself
+		   never scrolls (no rubber-band behind the fixed shell). */
+		overscroll-behavior: none;
+	}
+	:root:not(.lh-electron) body {
+		overflow: hidden;
+		-webkit-tap-highlight-color: transparent;
+	}
+}
+
+/* Bottom sheet rise (plan sheet, session actions): the settings-pop
+   register, vertical. */
+@keyframes lh-sheet-in {
+	from {
+		transform: translateY(24px);
+		opacity: 0;
+	}
+	to {
+		transform: translateY(0);
+		opacity: 1;
+	}
+}
+.lh-sheet-in {
+	animation: lh-sheet-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+	.lh-sheet-in {
+		animation: none;
+	}
 }

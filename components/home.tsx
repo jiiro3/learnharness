@@ -12,6 +12,7 @@ import { DictationBar, joinDictation, useDictation } from "@/components/dictatio
 import { useFieldCycle } from "@/components/field-cycle";
 import { SidebarToggle } from "@/components/sidebar";
 import { StatsBar } from "@/components/stats-bar";
+import { isPhoneNow, useIsPhone } from "@/components/phone";
 import type { TurnUsage } from "@/src/core";
 
 /**
@@ -31,6 +32,7 @@ export function Home({
 	rendering?: boolean;
 }) {
 	const router = useRouter();
+	const phone = useIsPhone();
 	const [topic, setTopic] = useState("");
 	/* The topic MIRROR ("nothing gets lost" round, 2026-10-01 — same
 	 * mechanics as the chat composer, owner's consistency ruling): a
@@ -77,6 +79,11 @@ export function Home({
 		[],
 	);
 	useFieldCycle(cycleTopicField);
+	// The hydration pass renders the desktop tree (autoFocus on); undo
+	// that focus once on a phone so the keyboard never opens unasked.
+	useEffect(() => {
+		if (isPhoneNow() && document.activeElement === topicInputRef.current) topicInputRef.current?.blur();
+	}, []);
 	const dictationWasActiveRef = useRef(false);
 	useEffect(() => {
 		if (dictation.active) {
@@ -157,7 +164,7 @@ export function Home({
 	};
 
 	return (
-		<div className="relative h-dvh">
+		<div className="relative h-dvh phone:h-full">
 			{/* Window-drag strip (merged chrome, owner 2026-09-17): a dedicated
 			    mask element, deliberately FIRST in the DOM. Electron's app-region
 			    mask resolves by DOM order — a no-drag element subtracts only drag
@@ -209,8 +216,8 @@ export function Home({
 			    OVER the graph (no gradient: the graph runs clean under it to the
 			    bottom edge). Matches chat.tsx's DOCK geometry (max-w-[46rem]
 			    px-4) so nothing shifts when a session starts (owner). */}
-			<div className="pointer-events-none absolute inset-x-0 bottom-0 pb-5">
-				<div className="pointer-events-auto mx-auto w-full max-w-[46rem] px-4">
+			<div className="pointer-events-none absolute inset-x-0 bottom-0 pb-5 phone:pb-2">
+				<div className="pointer-events-auto mx-auto w-full max-w-[46rem] px-4 phone:px-3">
 					{/* The pick bar (owner vision, 2026-10-04): the chain
 					    table's selection is PERSISTENT — picked
 					    propositions show here as a count + Clear in EITHER
@@ -271,7 +278,9 @@ export function Home({
 							}
 						}}
 						placeholder={mode === "practice" ? "What do you want to practice?" : "What do you want to learn?"}
-						autoFocus
+						// Phone (fork: mobile-layout): no autofocus — the soft
+						// keyboard would cover the graph on every visit home.
+						autoFocus={!phone}
 						rows={1}
 						className="field-sizing-content lh-input max-h-48 min-h-10 flex-1 resize-none bg-transparent px-2.5 py-2 outline-none placeholder:text-muted-foreground"
 					/>
