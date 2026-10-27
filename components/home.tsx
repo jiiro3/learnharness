@@ -13,6 +13,7 @@ import { useFieldCycle } from "@/components/field-cycle";
 import { SidebarToggle } from "@/components/sidebar";
 import { StatsBar } from "@/components/stats-bar";
 import { isPhoneNow, useIsPhone } from "@/components/phone";
+import { enterSends } from "@/components/enter-submits";
 import type { TurnUsage } from "@/src/core";
 
 /**
@@ -272,7 +273,9 @@ export function Home({
 								dictation.cancel();
 								return;
 							}
-							if (e.key === "Enter" && !e.shiftKey) {
+							// Phone: plain Enter is a newline; the start button
+							// (or ⌘/Ctrl+Enter) starts (enterSends).
+							if (!e.shiftKey && enterSends(e)) {
 								e.preventDefault();
 								void start();
 							}

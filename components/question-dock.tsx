@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDownIcon, ChevronRightIcon, PlayIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { finishDictation, isDictationActive, joinDictation, useDictationTarget } from "@/components/dictation";
-import { useEnterSubmits } from "@/components/enter-submits";
+import { enterSends, useEnterSubmits } from "@/components/enter-submits";
 import { ToolContentResponse } from "@/components/ai-elements/message";
 import { cn } from "@/lib/utils";
 import {
@@ -869,7 +869,8 @@ function QuestionDockForm({
 								}
 								// Chat convention: Enter submits, Shift+Enter is a newline;
 								// ⌘/Ctrl+Enter also submits (universal across the app).
-								if (e.key === "Enter" && (e.metaKey || e.ctrlKey || !e.shiftKey)) {
+								// Phone: plain Enter is a newline (enterSends).
+								if (enterSends(e)) {
 									e.preventDefault();
 									submit();
 								}
@@ -899,7 +900,8 @@ function QuestionDockForm({
 								// THE STANDARD CHORD (owner round 5, 2026-10-05): Enter
 								// submits, Shift+Enter is a newline, ⌘/Ctrl+Enter works
 								// too — identical to the practice dock and the composer.
-								if (e.key === "Enter" && (!e.shiftKey || e.metaKey || e.ctrlKey)) {
+								// Phone: plain Enter is a newline (enterSends).
+								if (enterSends(e)) {
 									e.preventDefault();
 									submit();
 								}

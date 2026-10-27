@@ -5,7 +5,7 @@ import { ChevronRightIcon } from "lucide-react";
 import { ToolContentResponse } from "@/components/ai-elements/message";
 import { Button } from "@/components/ui/button";
 import { joinDictation, useDictationTarget } from "@/components/dictation";
-import { useEnterSubmits } from "@/components/enter-submits";
+import { enterSends, useEnterSubmits } from "@/components/enter-submits";
 import { cn } from "@/lib/utils";
 
 /**
@@ -138,7 +138,8 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 						}
 						// Enter SENDS — the single lane (owner round 2, 2026-10-05);
 						// Shift+Enter is the newline, ⌘/Ctrl+Enter the chord too.
-						if (e.key === "Enter" && (!e.shiftKey || e.metaKey || e.ctrlKey)) {
+						// Phone: plain Enter is a newline (enterSends).
+						if (enterSends(e)) {
 							e.preventDefault();
 							submit();
 						}
