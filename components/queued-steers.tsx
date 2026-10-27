@@ -17,9 +17,30 @@ export interface QueuedSteerLine {
 }
 
 /** The pure body (SSR-pinnable): one right-aligned truncated line per
- *  queued steer, stacked. */
-export function QueuedSteersBody({ steers }: { steers: QueuedSteerLine[] }) {
+ *  queued steer, stacked.
+ *
+ *  `labelled` (phone, fork: mobile-layout): the quiet line is easy to miss
+ *  on a small screen, where the composer simply empties — each steer
+ *  renders as a small labelled row instead ("Queued · sends after this
+ *  reply" over the text), so the learner knows it was kept. */
+export function QueuedSteersBody({ steers, labelled = false }: { steers: QueuedSteerLine[]; labelled?: boolean }) {
 	if (steers.length === 0) return null;
+	if (labelled) {
+		return (
+			<div className="mb-2 flex flex-col gap-1" data-testid="queued-steers" role="status">
+				{steers.map((s) => (
+					<div key={s.id} className="rounded-xl border border-border/70 bg-card/80 px-3 py-1.5">
+						<span className="block font-ui text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+							Queued · sends after this reply
+						</span>
+						<span title={s.text} className="block truncate text-sm">
+							{s.text}
+						</span>
+					</div>
+				))}
+			</div>
+		);
+	}
 	return (
 		<div className="flex flex-col items-end gap-0.5 pb-1 pr-4" data-testid="queued-steers">
 			{steers.map((s) => (

@@ -2115,6 +2115,7 @@ function DockOverlay({
 	setupCta?: React.ReactNode;
 }) {
 	const { isAtBottom, scrollToBottom, scrollRef } = useStickToBottomContext();
+	const phone = useIsPhone();
 	// Render-fresh bottom state (flicker round): the arrival block below reads
 	// it DURING RENDER — the same value the after-paint effect used to read a
 	// frame too late. Assigned per render like the other refs below.
@@ -2511,7 +2512,7 @@ function DockOverlay({
 					    one-liners above the shell - right-aligned to where its corner
 					    rounding starts, truncated, no background, no container. A
 					    line dies when its card lands (visibleQueuedSteers). */}
-					<QueuedSteersBody steers={queuedSteers} />
+					<QueuedSteersBody steers={queuedSteers} labelled={phone} />
 					{sendFailure}
 					{/* The reading-thinking field (owner 2026-10-03): mounted while a
 					    teach-phase check waits — the same cue that collapses it. It
