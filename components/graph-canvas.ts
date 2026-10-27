@@ -146,8 +146,10 @@ export interface RendererCallbacks {
 	/** The empty stage was clicked. */
 	onStageClick: () => void;
 	/** Any camera move (pan/zoom) — the caller dismisses anchored UI and
-	 *  persists the camera (view state). */
-	onCameraMove: (transform: { k: number; x: number; y: number }) => void;
+	 *  persists the camera (view state). `view` is the viewport size the
+	 *  transform belongs to (0×0 before the first layout) — persisted with
+	 *  it so the phone can restore the camera viewport-relative. */
+	onCameraMove: (transform: { k: number; x: number; y: number }, view: { w: number; h: number }) => void;
 	/** The live sim settled after a drag: commit the new rest state
 	 *  (the caller PUTs it to the positions ledger). */
 	onCommit: (positions: Record<string, Position>) => void;
@@ -438,6 +440,100 @@ export function fitTransform(
 	return { x: w / 2 - cx * k, y: h / 2 - cy * k, k };
 }
 
+/** d3-zoom's scale extent for the renderer (kept here so the pure
+ *  framing helper clamps to the same range). */
+export const SCALE_EXTENT: [number, number] = [0.02, 40];
+
+/** A camera as the caller persists it (fork: mobile-layout): the d3
+ *  transform plus, when known, the viewport size it was taken in. The
+ *  size makes the raw pixel translate viewport-relative again — see
+ *  reanchorCamera. */
+export interface SavedCamera {
+	k: number;
+	x: number;
+	y: number;
+	w?: number;
+	h?: number;
+}
+
+/** Validate a persisted camera (localStorage JSON): null for any shape
+ *  that is not a finite transform with k > 0. The viewport size is kept
+ *  only when both sides are real (≥ 10px — a hidden canvas reports 0). */
+export function parseSavedCamera(raw: unknown): SavedCamera | null {
+	if (!raw || typeof raw !== "object") return null;
+	const { k, x, y, w, h } = raw as Record<string, unknown>;
+	const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+	if (!finite(k) || k <= 0 || !finite(x) || !finite(y)) return null;
+	if (finite(w) && finite(h) && w >= 10 && h >= 10) return { k, x, y, w, h };
+	return { k, x, y };
+}
+
+/** Re-express a camera taken in a fromW×fromH viewport for a toW×toH
+ *  one, keeping the SAME world point under the viewport center at the
+ *  same zoom (the resize anchor, 2026-09-17). Identity when the sizes
+ *  match. */
+export function reanchorCamera(
+	t: { k: number; x: number; y: number },
+	fromW: number,
+	fromH: number,
+	toW: number,
+	toH: number,
+): { k: number; x: number; y: number } {
+	const wx = (fromW / 2 - t.x) / t.k;
+	const wy = (fromH / 2 - t.y) / t.k;
+	return { k: t.k, x: toW / 2 - wx * t.k, y: toH / 2 - wy * t.k };
+}
+
+/** The transform a persisted camera restores to in a w×h viewport. With
+ *  `anchored` (phone) and a recorded viewport size, the camera is
+ *  re-centered for the new size (rotation, the soft keyboard, a split
+ *  screen); otherwise the raw pixel transform applies unchanged (the
+ *  desktop behavior, and legacy entries without a size). */
+export function restoreCamera(
+	saved: SavedCamera,
+	w: number,
+	h: number,
+	anchored: boolean,
+): { k: number; x: number; y: number } {
+	if (anchored && saved.w !== undefined && saved.h !== undefined) return reanchorCamera(saved, saved.w, saved.h, w, h);
+	return { k: saved.k, x: saved.x, y: saved.y };
+}
+
+/** True when any part of the world bbox lands inside the w×h viewport
+ *  under transform t (screen = world·k + [x,y]). */
+export function bboxOnScreen(
+	bbox: { minX: number; maxX: number; minY: number; maxY: number },
+	t: { k: number; x: number; y: number },
+	w: number,
+	h: number,
+): boolean {
+	const left = bbox.minX * t.k + t.x;
+	const right = bbox.maxX * t.k + t.x;
+	const top = bbox.minY * t.k + t.y;
+	const bottom = bbox.maxY * t.k + t.y;
+	return right >= 0 && left <= w && bottom >= 0 && top <= h;
+}
+
+/** Frame `bbox` like fitTransform, but never zoomed in past maxK (a
+ *  single node's bbox is a point — its fit zoom is infinite) and always
+ *  inside the renderer's scale extent. Used to take the camera to search
+ *  matches (fork: mobile-layout). */
+export function frameTransform(
+	bbox: { minX: number; maxX: number; minY: number; maxY: number },
+	w: number,
+	h: number,
+	padding: number,
+	maxK: number,
+): { x: number; y: number; k: number } {
+	// A viewport smaller than the padding would yield k ≤ 0: drop the pad.
+	const pad = Math.min(padding, Math.max(0, Math.min(w, h) / 2 - 1));
+	const fit = fitTransform(bbox, w, h, pad);
+	const k = Math.min(Math.max(Math.min(fit.k, maxK), SCALE_EXTENT[0]), SCALE_EXTENT[1]);
+	const cx = (bbox.minX + bbox.maxX) / 2;
+	const cy = (bbox.minY + bbox.maxY) / 2;
+	return { x: w / 2 - cx * k, y: h / 2 - cy * k, k };
+}
+
 /** The arrowhead geometry for a directed edge a→b: shaft endpoints
  *  (clear of both node discs) and the head triangle (tip on the target
  *  disc edge, wideness = 0.8 × head length — the sigma arrow shape). */
@@ -577,6 +673,18 @@ export class GraphCanvasRenderer {
 	 *  callbacks already see the NEW size in clientWidth/Height). */
 	private viewW = 0;
 	private viewH = 0;
+	/** Phone only (fork: mobile-layout): the last REAL size (≥ 10px). A
+	 *  canvas hidden at 0×0 and shown again re-anchors from here instead of
+	 *  skipping the anchor (the raw translate then drifted off-center). */
+	private anchorW = 0;
+	private anchorH = 0;
+	/** Phone only: the persisted camera, applied at the first real size
+	 *  (viewport-relative — see restoreCamera). */
+	private pendingCamera: SavedCamera | null = null;
+	/** Phone only: a restored camera is checked once against the first
+	 *  data — a camera that shows none of the graph re-fits instead. */
+	private recoverCheck = false;
+	private isPhone: () => boolean;
 	/** The k that frames the whole graph — the label-gate's "1×". */
 	private kFit = 1;
 	/** World-space bounds of the current nodes — fit() and the resize-time
@@ -670,8 +778,14 @@ export class GraphCanvasRenderer {
 		 *  present it REPLACES the first-open fit; the graph opens exactly
 		 *  where the user left it (2026-09-15: a default zoom exists only
 		 *  on first open, ever). Invalid shapes fall back to fit. */
-		initialCamera?: { k: number; x: number; y: number } | null,
+		initialCamera?: SavedCamera | null,
+		/** Fork: mobile-layout — true while the phone layout applies. The
+		 *  phone restores the camera viewport-relative, re-anchors across a
+		 *  hidden (0×0) phase, and re-fits a restored camera that shows
+		 *  none of the graph. Desktop behavior is unchanged without it. */
+		options?: { isPhone?: () => boolean },
 	) {
+		this.isPhone = options?.isPhone ?? (() => false);
 		this.canvas = canvas;
 		const ctx = canvas.getContext("2d");
 		if (!ctx) throw new Error("2d context unavailable");
@@ -681,7 +795,7 @@ export class GraphCanvasRenderer {
 		// d3-zoom owns pan / wheel zoom-to-cursor / touch pinch; every
 		// transform change just marks dirty (draws happen in OUR loop).
 		this.zoomBehavior = zoom<HTMLCanvasElement, unknown>()
-			.scaleExtent([0.02, 40])
+			.scaleExtent(SCALE_EXTENT)
 			// Touch (fork: mobile-layout): pointer events fire BEFORE touch
 			// events, so by touchstart a finger on a node has already claimed
 			// it (dragId) — a one-finger touch then belongs to the node drag,
@@ -695,7 +809,7 @@ export class GraphCanvasRenderer {
 				this.transform = transform;
 				this.markDirty();
 				// The transform doubles as the persistence payload (view state).
-				this.callbacks.onCameraMove(transform);
+				this.callbacks.onCameraMove(transform, { w: this.viewW, h: this.viewH });
 			});
 		select(canvas)
 			.call(this.zoomBehavior)
@@ -720,16 +834,18 @@ export class GraphCanvasRenderer {
 		// left the graph. Applied through the zoom behavior so d3's internal
 		// state and ours agree (the same path fit() uses); hasFit so neither
 		// the ResizeObserver nor setData re-fits over it.
-		if (
-			initialCamera &&
-			typeof initialCamera.k === "number" && Number.isFinite(initialCamera.k) && initialCamera.k > 0 &&
-			typeof initialCamera.x === "number" && Number.isFinite(initialCamera.x) &&
-			typeof initialCamera.y === "number" && Number.isFinite(initialCamera.y)
-		) {
+		const restored = parseSavedCamera(initialCamera);
+		if (restored && this.isPhone()) {
+			// Phone: applied at the first real size (end of constructor or
+			// the ResizeObserver), re-centered for that size.
+			this.hasFit = true;
+			this.pendingCamera = restored;
+			this.recoverCheck = true;
+		} else if (restored) {
 			this.hasFit = true;
 			select(canvas).call(
 				this.zoomBehavior.transform,
-				zoomIdentity.translate(initialCamera.x, initialCamera.y).scale(initialCamera.k),
+				zoomIdentity.translate(restored.x, restored.y).scale(restored.k),
 			);
 		}
 
@@ -739,23 +855,29 @@ export class GraphCanvasRenderer {
 			// BEFORE syncSize (which updates viewW/H to the new size).
 			const prevW = this.viewW;
 			const prevH = this.viewH;
-			const { x: tx, y: ty, k } = this.transform;
-			const wx = (prevW / 2 - tx) / k;
-			const wy = (prevH / 2 - ty) / k;
+			const before = { k: this.transform.k, x: this.transform.x, y: this.transform.y };
 			this.syncSize();
 			if (!this.hasFit) this.fit(); // first real size → fit once
+			else if (this.pendingCamera) this.applyPendingCamera(); // phone restore
 			else {
 				this.refreshFitZoom(); // the gate's "1×" is viewport-bound
 				// Center-anchor (2026-09-17, owner): same world point under
 				// the NEW center. Applied through the zoom behavior like every
 				// camera move (d3 state, persistence, card-dismiss all agree).
-				if (prevW > 0 && prevH > 0 && this.viewW > 0 && this.viewH > 0) {
-					select(canvas).call(
-						this.zoomBehavior.transform,
-						zoomIdentity.translate(this.viewW / 2 - wx * k, this.viewH / 2 - wy * k).scale(k),
-					);
+				// Phone (fork: mobile-layout): a hidden 0×0 phase anchors
+				// from the last real size, and 0×0 itself is never applied.
+				const phone = this.isPhone();
+				const fromW = phone && prevW < 10 ? this.anchorW : prevW;
+				const fromH = phone && prevH < 10 ? this.anchorH : prevH;
+				const ok = phone
+					? fromW >= 10 && fromH >= 10 && this.viewW >= 10 && this.viewH >= 10
+					: prevW > 0 && prevH > 0 && this.viewW > 0 && this.viewH > 0;
+				if (ok) {
+					const t = reanchorCamera(before, fromW, fromH, this.viewW, this.viewH);
+					select(canvas).call(this.zoomBehavior.transform, zoomIdentity.translate(t.x, t.y).scale(t.k));
 				}
 			}
+			this.noteRealSize();
 			// Redraw SYNCHRONOUSLY: syncSize may have reallocated the backing
 			// store (which clears the canvas), and during live window resizes
 			// rAF is starved by relayout — a deferred draw would leave the
@@ -764,6 +886,39 @@ export class GraphCanvasRenderer {
 		});
 		this.resizeObserver.observe(canvas);
 		this.syncSize();
+		this.noteRealSize();
+		if (this.pendingCamera) this.applyPendingCamera();
+	}
+
+	/** Phone: remember the last real viewport size (the re-anchor source
+	 *  after a hidden phase). */
+	private noteRealSize(): void {
+		if (this.viewW >= 10 && this.viewH >= 10) {
+			this.anchorW = this.viewW;
+			this.anchorH = this.viewH;
+		}
+	}
+
+	/** Phone: apply the persisted camera once the viewport has a real
+	 *  size, re-centered for it (restoreCamera). Waits while 0×0. */
+	private applyPendingCamera(): void {
+		const saved = this.pendingCamera;
+		if (!saved || this.viewW < 10 || this.viewH < 10) return;
+		this.pendingCamera = null;
+		this.refreshFitZoom();
+		const t = restoreCamera(saved, this.viewW, this.viewH, true);
+		select(this.canvas).call(this.zoomBehavior.transform, zoomIdentity.translate(t.x, t.y).scale(t.k));
+		this.recoverIfOffscreen();
+	}
+
+	/** Phone: once, after a restored camera AND the first data exist — a
+	 *  camera that shows none of the graph (an old drifted view) re-fits,
+	 *  so the graph never opens on an empty stage. */
+	private recoverIfOffscreen(): void {
+		if (!this.recoverCheck || this.pendingCamera || !this.worldBBox || !this.data?.nodes.length) return;
+		if (this.viewW < 10 || this.viewH < 10) return;
+		this.recoverCheck = false;
+		if (!bboxOnScreen(this.worldBBox, this.transform, this.viewW, this.viewH)) this.fit();
 	}
 
 	// ── Public API ──
@@ -785,7 +940,10 @@ export class GraphCanvasRenderer {
 		if (!this.hasFit && data.nodes.length > 0) this.fit();
 		// The camera may be user-restored (constructor initialCamera) — the
 		// gate's "1×" reference still needs the fresh bbox's fit zoom.
-		else this.refreshFitZoom();
+		else {
+			this.refreshFitZoom();
+			this.recoverIfOffscreen(); // phone only (set by the phone restore)
+		}
 		// Rebuild the live sim around the fresh nodes. New data means the
 		// server spoke (merge or refetch); any pending commit is moot and
 		// the graph is at rest until the next drag.
@@ -900,6 +1058,41 @@ export class GraphCanvasRenderer {
 			this.zoomBehavior.transform,
 			zoomIdentity.translate(t.x, t.y).scale(t.k),
 		);
+	}
+
+	/** The fit/recenter control (fork: mobile-layout): frame the whole
+	 *  graph now, cancelling any wheel glide in flight. */
+	recenter(): void {
+		this.zoomTarget = null;
+		this.fit();
+	}
+
+	/** Take the camera to these nodes (search matches — fork:
+	 *  mobile-layout): frame their current positions, zooming in no
+	 *  further than the current zoom or the zoom where node labels show,
+	 *  whichever is closer. Unknown ids are ignored; no ids → no move. */
+	frameNodes(ids: Iterable<string>): void {
+		let minX = Infinity;
+		let minY = Infinity;
+		let maxX = -Infinity;
+		let maxY = -Infinity;
+		for (const id of ids) {
+			const n = this.nodeById.get(id);
+			if (!n) continue;
+			if (n.x < minX) minX = n.x;
+			if (n.y < minY) minY = n.y;
+			if (n.x > maxX) maxX = n.x;
+			if (n.y > maxY) maxY = n.y;
+		}
+		if (minX === Infinity) return;
+		const w = this.canvas.clientWidth;
+		const h = this.canvas.clientHeight;
+		if (w < 10 || h < 10) return;
+		this.refreshFitZoom();
+		const kLabel = this.settings ? this.kFit / this.settings.labelZoom : this.kFit;
+		const t = frameTransform({ minX, maxX, minY, maxY }, w, h, 60, Math.max(this.transform.k, kLabel));
+		this.zoomTarget = null;
+		select(this.canvas).call(this.zoomBehavior.transform, zoomIdentity.translate(t.x, t.y).scale(t.k));
 	}
 
 	/** Refresh the label-gate's "1×" reference from the current bbox +
