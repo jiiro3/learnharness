@@ -15,7 +15,9 @@ import {
 	dismissedAnswer,
 	coerceCorrectAnswer,
 	CONFIDENCE_STOPS,
-	DEFAULT_CONFIDENCE_INDEX,
+	CONFIDENCE_MIDDLE_INDEX,
+	nearestConfidenceIndex,
+	stepConfidenceIndex,
 	isCorrect,
 	normalizeOptions,
 	quizInputProblems,
@@ -36,6 +38,8 @@ import {
 	toClientQuestion,
 } from "../src/core/question-core.ts";
 import { toolQuestionKind } from "../src/core/pending.ts";
+import { parseChatInput } from "../src/core/input-events.ts";
+import { newAnswerResult } from "../src/core/native-messages.ts";
 import { parseQuizInput } from "../src/core/tool-parts.ts";
 
 // ─── the authoring contract (TypeBox schemas + execute-time refinements) ──
@@ -439,7 +443,22 @@ function quizData(overrides?: Partial<QuestionData>): QuestionData {
 describe("confidence stops", () => {
 	it("the owner-decided grid (2026-10-01): resolution concentrates at the top", () => {
 		assert.deepEqual(CONFIDENCE_STOPS, [0, 30, 50, 70, 90, 100]);
-		assert.equal(CONFIDENCE_STOPS[DEFAULT_CONFIDENCE_INDEX], 50, "rests at a real coin flip");
+		assert.equal(CONFIDENCE_STOPS[CONFIDENCE_MIDDLE_INDEX], 50, "the middle stop is a real coin flip");
+	});
+
+	it("←/→ from unset lands on the middle stop, then walks the stops (clamped)", () => {
+		assert.equal(stepConfidenceIndex(null, 1), CONFIDENCE_MIDDLE_INDEX);
+		assert.equal(stepConfidenceIndex(null, -1), CONFIDENCE_MIDDLE_INDEX);
+		assert.equal(stepConfidenceIndex(2, 1), 3);
+		assert.equal(stepConfidenceIndex(0, -1), 0);
+		assert.equal(stepConfidenceIndex(CONFIDENCE_STOPS.length - 1, 1), CONFIDENCE_STOPS.length - 1);
+	});
+
+	it("a raw slider value snaps to the nearest stop", () => {
+		assert.equal(CONFIDENCE_STOPS[nearestConfidenceIndex(50)], 50);
+		assert.equal(CONFIDENCE_STOPS[nearestConfidenceIndex(47)], 50);
+		assert.equal(CONFIDENCE_STOPS[nearestConfidenceIndex(12)], 0);
+		assert.equal(CONFIDENCE_STOPS[nearestConfidenceIndex(96)], 100);
 	});
 });
 
@@ -482,6 +501,14 @@ describe("buildAnswer", () => {
 		assert.equal(buildAnswer(quizData(), { values: ["mercury"], confidence: 150 }).confidence, 100);
 		assert.equal(buildAnswer(quizData(), { values: ["mercury"], confidence: -5 }).confidence, 0);
 		assert.equal(buildAnswer(quizData(), { values: ["mercury"] }).confidence, undefined);
+	});
+
+	it("an untouched slider records NO confidence — never a default 50 (null from the wire too)", () => {
+		const untouched = buildAnswer(quizData(), { values: ["mercury"] });
+		assert.ok(!("confidence" in untouched), "no key at all");
+		const wireNull = buildAnswer(quizData(), { values: ["mercury"], confidence: null as unknown as number });
+		assert.ok(!("confidence" in wireNull), "null is not set, never Math.round(null) = 0");
+		assert.equal(buildAnswer(quizData(), { values: ["mercury"], confidence: 50 }).confidence, 50, "a deliberate 50 stays 50");
 	});
 
 	it("drops confidence on dontKnow and on non-quiz kinds", () => {
@@ -533,6 +560,18 @@ describe("compactAnswerForModel", () => {
 		assert.ok(!raw.includes("Mercury orbits closest"), "no explanation");
 		assert.ok(!("correctIndices" in compact), "correct is the verdict; indices are the call's");
 		assert.ok(!("questionId" in compact), "questionId was the toolCallId restated");
+	});
+
+	it("quiz with confidence NOT SET: the model sees no confidence key; a number serializes as before", () => {
+		const unset = compactAnswerForModel(buildAnswer(quizData(), { values: ["mercury"] }));
+		assert.deepEqual(unset, { kind: "quiz", answers: [{ index: 1, label: "Mercury" }], correct: true });
+		assert.ok(!JSON.stringify(unset).includes("confidence"));
+		// A foreign/legacy record with a null never leaks a null to the model.
+		const legacyNull = compactAnswerForModel({ ...buildAnswer(quizData(), { values: ["mercury"] }), confidence: null as unknown as number });
+		assert.ok(!("confidence" in legacyNull));
+		// Old records with a number keep working exactly as before.
+		const set = compactAnswerForModel(buildAnswer(quizData(), { values: ["venus"], confidence: 90 }));
+		assert.deepEqual(set, { kind: "quiz", answers: [{ index: 2, label: "Venus" }], correct: false, confidence: 90 });
 	});
 
 	it("dontKnow: the gap flag stands alone — no verdict, no confidence", () => {
@@ -817,5 +856,36 @@ describe("the quiz role field (predict | check)", () => {
 	it("the display parse KEEPS the role: quizDisplayInputSchema retains type where the base strips it", () => {
 		const cleaned = Value.Clean(quizDisplayInputSchema, { ...valid }) as Record<string, unknown>;
 		assert.equal(cleaned.type, "check", "role survives the display parse (the dock gates collapse + labels on it)");
+	});
+});
+
+// ─── confidence "not set" through the server input + the model's view ─────
+
+describe("confidence not set — the answer input and the teacher's serialized view", () => {
+	const modelText = (answer: unknown) => {
+		const msg = newAnswerResult("call_q", "quiz", answer);
+		return (msg.content[0] as { text: string }).text;
+	};
+
+	it("parseChatInput drops a null/non-number confidence and keeps a numeric one", () => {
+		const base = buildAnswer(quizData(), { values: ["mercury"] });
+		const withNull = parseChatInput({ type: "answer", toolCallId: "call_q", answer: { ...base, confidence: null } });
+		assert.ok(withNull.type === "answer" && !("confidence" in withNull.answer));
+		const withString = parseChatInput({ type: "answer", toolCallId: "call_q", answer: { ...base, confidence: "70" } });
+		assert.ok(withString.type === "answer" && !("confidence" in withString.answer));
+		const absent = parseChatInput({ type: "answer", toolCallId: "call_q", answer: base });
+		assert.ok(absent.type === "answer" && absent.answer === base, "an absent key passes through untouched");
+		const old = parseChatInput({ type: "answer", toolCallId: "call_q", answer: { ...base, confidence: 70 } });
+		assert.ok(old.type === "answer" && old.answer.confidence === 70, "old numeric records keep working");
+	});
+
+	it("the model-visible tool result omits confidence when not set and carries it when set", () => {
+		const unset = JSON.parse(modelText(buildAnswer(quizData(), { values: ["mercury"] })));
+		assert.deepEqual(unset, { kind: "quiz", answers: [{ index: 1, label: "Mercury" }], correct: true });
+		const set = JSON.parse(modelText(buildAnswer(quizData(), { values: ["mercury"], confidence: 70 })));
+		assert.equal(set.confidence, 70);
+		// The full record (details) keeps the same shape: no key when unset.
+		const msg = newAnswerResult("call_q", "quiz", buildAnswer(quizData(), { values: ["mercury"] }));
+		assert.ok(!("confidence" in (msg.details as object)));
 	});
 });

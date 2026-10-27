@@ -19,6 +19,9 @@ import { CONFIDENCE_STOPS } from "@/src/core";
  * as background layers UNDER the fill, and the fill itself TRANSPARENT
  * past the value — so ticks show only on the empty side, never over the
  * color. Ticks skip 0 and 100 (the rail's ends already say those).
+ *
+ * UNSET (2026-10-26): `undefined` paints the bare rail — base + ticks, no
+ * fill — the learner never set a confidence, and the empty rail says so.
  */
 
 /** The six-step ramp (owner ruling): 0 red → 100 emerald, indexed by stop. */
@@ -31,13 +34,14 @@ export const CONFIDENCE_COLORS: readonly string[] = [
 	"#10b981", // 100
 ];
 
-/** The rail's paint for a stop value (0–100). */
-export function confidenceRailStyle(value: number): CSSProperties {
-	const color = CONFIDENCE_COLORS[CONFIDENCE_STOPS.indexOf(value)] ?? CONFIDENCE_COLORS[2]!;
+/** The rail's paint for a stop value (0–100); undefined = unset (no fill). */
+export function confidenceRailStyle(value: number | undefined): CSSProperties {
+	const color = value === undefined ? "transparent" : (CONFIDENCE_COLORS[CONFIDENCE_STOPS.indexOf(value)] ?? CONFIDENCE_COLORS[2]!);
+	const fill = value ?? 0;
 	return {
 		backgroundColor: "#141414",
 		backgroundImage: [
-			`linear-gradient(90deg, ${color} 0%, ${color} ${value}%, transparent ${value}%, transparent 100%)`,
+			`linear-gradient(90deg, ${color} 0%, ${color} ${fill}%, transparent ${fill}%, transparent 100%)`,
 			...[30, 50, 70, 90].map(
 				() => "linear-gradient(90deg, rgba(230,230,230,0.35), rgba(230,230,230,0.35))",
 			),
@@ -48,8 +52,8 @@ export function confidenceRailStyle(value: number): CSSProperties {
 	};
 }
 
-/** The static rail — the slider's look, disc removed. */
-export function ConfidenceRail({ value, className }: { value: number; className?: string }) {
+/** The static rail — the slider's look, disc removed. undefined = unset. */
+export function ConfidenceRail({ value, className }: { value: number | undefined; className?: string }) {
 	return (
 		<div
 			aria-hidden

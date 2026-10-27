@@ -13,6 +13,7 @@ import type { LhMessage } from "../src/core/native-messages.ts";
 import { messageMarkdown, sessionMarkdown } from "../src/core/session-markdown.ts";
 import { messageViewLines } from "../src/core/coverage.ts";
 import { coverageSlots } from "../src/core/coverage.ts";
+import { buildAnswer, normalizeOptions, type QuestionData } from "../src/core/question-core.ts";
 
 function user(id: string, text: string): LhMessage {
 	return { id, role: "user", content: text, timestamp: Date.now() } as never;
@@ -251,5 +252,28 @@ describe("sessionMarkdown", () => {
 			const hasMarkdown = messageMarkdown(message, message.id) !== null;
 			assert.equal(hasLines, isTeacher && hasMarkdown, `view lines follow teacher prose for ${message.id}`);
 		}
+	});
+});
+
+describe("confidence in the export (optional since 2026-10-26)", () => {
+	const qd = (): QuestionData => {
+		const options = normalizeOptions([{ label: "Mercury" }, { label: "Venus" }]);
+		return { id: "q", kind: "quiz", question: "Closest planet?", mode: "single-select", options, correctIndices: [1], explanation: "x", createdAt: "t" };
+	};
+	const doc = (details: unknown) =>
+		sessionMarkdown([callMsg("a1", "q1", "quiz", { question: "Closest planet?" }), result("r1", "q1", "quiz", details)], { anchors: false });
+
+	it("a quiz answer with confidence NOT SET exports cleanly — no phantom 50, no null", () => {
+		const unset = buildAnswer(qd(), { values: ["Mercury"] });
+		const md = doc(unset);
+		assert.match(md, /\*\*Q:\*\* Closest planet\?/);
+		assert.match(md, /The learner answered correctly\./);
+		assert.ok(!/50|null|undefined|NaN/.test(md), md);
+	});
+
+	it("an old record WITH a number and a foreign null export the same block as an unset one", () => {
+		const unset = doc(buildAnswer(qd(), { values: ["Mercury"] }));
+		assert.equal(doc(buildAnswer(qd(), { values: ["Mercury"], confidence: 70 })), unset);
+		assert.equal(doc({ ...buildAnswer(qd(), { values: ["Mercury"] }), confidence: null }), unset);
 	});
 });
