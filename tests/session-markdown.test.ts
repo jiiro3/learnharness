@@ -88,7 +88,16 @@ describe("messageMarkdown", () => {
 		assert.match(md, /^### Quiz · r1$/m);
 		assert.match(md, /\*\*Q:\*\* What is a derivative\?/);
 		assert.match(md, /The learner answered incorrectly\./);
-		assert.match(md, /\*\(his thinking: mixed up signs\)\*/);
+		assert.match(md, /\*\(the learner's thinking: mixed up signs\)\*/, "the pre-rename `note` key still renders");
+	});
+
+	it("check blocks read `thinking` (the current key) and prefer it over a legacy `note`", () => {
+		const md = messageMarkdown(
+			result("r1", "q1", "quiz", { questionText: "Q?", correct: true, dontKnow: false, thinking: "used the chain rule", note: "old" }),
+			"r1",
+		)!;
+		assert.match(md, /\*\(the learner's thinking: used the chain rule\)\*/);
+		assert.doesNotMatch(md, /old/);
 	});
 
 	it("explain results: the learner's own words are shown", () => {
@@ -125,6 +134,26 @@ describe("messageMarkdown", () => {
 			"r2",
 		)!;
 		assert.match(free, /The learner answered: because/);
+	});
+
+	it("ask blocks: current OptionAnswer records render their labels, with the learner's thinking", () => {
+		const md = messageMarkdown(
+			result("r1", "a1", "ask_user_question", {
+				questionText: "Which way?",
+				dontKnow: false,
+				answers: [
+					{ index: 1, label: "North", value: "n" },
+					{ index: 3, label: "East", value: "e" },
+				],
+				other: "also up",
+				thinking: "the river runs that way",
+			}),
+			"r1",
+		)!;
+		assert.match(md, /The learner chose: North, East, also up/);
+		assert.doesNotMatch(md, /\[object Object\]/);
+		assert.match(md, /\*\(the learner's thinking: the river runs that way\)\*/);
+		assert.doesNotMatch(md, /his thinking/);
 	});
 
 	it("other clean tool results: one line; failed calls and markers: nothing", () => {

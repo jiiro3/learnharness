@@ -10,7 +10,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { createWarmMinter } from "../components/dictation.tsx";
+import { canCaptureAudio, createWarmMinter, phoneOffersDictation } from "../components/dictation.tsx";
 
 describe("warm-token cache (mitigation D, owner 2026-09-27)", () => {
 	it("caches: concurrent and repeat mints share ONE promise and mint once", async () => {
@@ -99,5 +99,18 @@ describe("warm-token cache (mitigation D, owner 2026-09-27)", () => {
 		m.refresh(); // must not reject (unhandled rejection would be a bug)
 		await new Promise((r) => setTimeout(r, 0)); // let the background mint settle
 		assert.equal(mints, 1);
+	});
+});
+
+describe("phone mic offer (fork: mobile-layout)", () => {
+	it("offers the mic only with a known Deepgram key AND audio capture", () => {
+		assert.equal(phoneOffersDictation("present", true), true);
+		assert.equal(phoneOffersDictation("absent", true), false, "no key: nothing to offer");
+		assert.equal(phoneOffersDictation("unknown", true), false, "pending: never flash in");
+		assert.equal(phoneOffersDictation("present", false), false, "insecure context: no getUserMedia");
+	});
+
+	it("no window (SSR, node): no audio capture", () => {
+		assert.equal(canCaptureAudio(), false);
 	});
 });

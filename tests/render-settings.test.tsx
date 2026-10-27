@@ -58,6 +58,14 @@ describe("SettingsDialog (the designed surface, SSR)", () => {
 		// Modal-only doctrine: no link back to /settings anywhere in it.
 		assert.ok(!html.includes('href="/settings"'));
 	});
+
+	it("phone (fork: mobile-layout): the Keyboard tab is phone-hidden; the others are not", () => {
+		const html = renderToStaticMarkup(<SettingsDialogBody onClose={() => {}} />);
+		assert.ok(tagOf(html, "settings-nav-keyboard").includes("phone:hidden"));
+		for (const id of ["general", "keys", "agent", "appearance", "graph"]) {
+			assert.ok(!tagOf(html, `settings-nav-${id}`).includes("phone:hidden"), id);
+		}
+	});
 });
 
 describe("AgentSection (thin SSR)", () => {
