@@ -916,12 +916,12 @@ function QuestionDockForm({
 					)}
 					<div className="flex items-center justify-between gap-2 p-1">
 						<span aria-hidden className="pl-1.5 text-xs text-muted-foreground">
-								{compactionRunning ? "compacting session…" : "↵ submits · ⇧↵ newline"}
+								{compactionRunning ? "compacting session…" : <span className="phone:hidden">↵ submits · ⇧↵ newline</span>}
 						</span>
 						<Button
 							type="submit"
 							disabled={!canSubmit || compactionRunning}
-							className="ml-auto h-9 rounded-[6px] px-3.5 text-sm font-medium"
+							className="ml-auto h-9 rounded-[6px] px-3.5 text-sm font-medium phone:h-11"
 						>
 							Submit answer
 						</Button>

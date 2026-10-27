@@ -87,8 +87,8 @@ import { useSettingsSaved } from "@/components/settings-signal";
  * deliberately narrower (~46rem centered) per the reference. Same ELEMENT,
  * same place — width polish only.
  */
-const COLUMN = "mx-auto w-full max-w-none px-6";
-const DOCK = "mx-auto w-full max-w-[46rem] px-4";
+const COLUMN = "mx-auto w-full max-w-none px-6 phone:px-4";
+const DOCK = "mx-auto w-full max-w-[46rem] px-4 phone:px-3";
 // The DOCK container's fixed width (46rem) and the plan marginalia's
 // geometry (owner, plan-placement round): the bare diagram sits in the
 // dock band's RIGHT flank — MARGIN_GAP from the DOCK container's edge and
@@ -1195,7 +1195,7 @@ export function Chat({
 		    chip) spans from the left sidebar's edge to the panel's edge. The
 		    dock overlays the column bottom (outside the scroller); a spacer in
 		    the transcript reserves its height. */}
-		<div className="flex h-dvh">
+		<div className="flex h-dvh phone:h-full">
 			<div className="flex min-w-0 flex-1 flex-col">
 				{/* The top bar is its own block (owner, top-fade round 4): in flow
 				    above the scroller on the plain page background — no gradient. Its
@@ -1213,6 +1213,7 @@ export function Chat({
 					// never fire. Rename mode is interactive mode (owner ask) —
 					// TopBar's one escape hatch.
 					drag={!renaming}
+					phoneBack
 					onMouseDown={(e) => {
 						// Escape hitbox: any mousedown outside the input itself blurs
 						// it, running the existing onBlur commit path. The input is
@@ -1240,7 +1241,7 @@ export function Chat({
 								spellCheck={false}
 								aria-label="Session title"
 								title="Rename this session"
-								className="lh-no-drag min-w-[8ch] max-w-[70%] shrink-0 bg-transparent font-title text-3xl tracking-tight caret-current outline-none [field-sizing:content]"
+								className="lh-no-drag min-w-[8ch] max-w-[70%] shrink-0 bg-transparent font-title text-3xl tracking-tight caret-current outline-none [field-sizing:content] phone:text-xl"
 							/>
 							{/* flex-1 spacer during rename too, so the chips stay at
 							    the right edge; clicks here commit via the header
@@ -1261,7 +1262,7 @@ export function Chat({
 								setTitleDraft(titleText);
 								setRenaming(true);
 							}}
-							className="lh-no-drag -mx-1.5 min-w-4 shrink cursor-text truncate rounded-md px-1.5 text-left font-title text-3xl tracking-tight transition-colors hover:bg-accent"
+							className="lh-no-drag -mx-1.5 min-w-4 shrink cursor-text truncate rounded-md px-1.5 text-left font-title text-3xl tracking-tight transition-colors hover:bg-accent phone:text-xl"
 						>
 							{titleText}
 							</button>
@@ -1283,7 +1284,7 @@ export function Chat({
 								blurAfterPointerClick(e);
 								setPlanOpen(true);
 							}}
-							className="lh-no-drag flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border border-border/80 px-2 py-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground transition-colors hover:border-border hover:text-foreground"
+							className="lh-no-drag flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border border-border/80 px-2 py-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground transition-colors hover:border-border hover:text-foreground phone:h-11 phone:px-3.5"
 						>
 							<WaypointsIcon className="size-3.5 text-primary" aria-hidden />
 							Plan
@@ -1305,13 +1306,17 @@ export function Chat({
 							data-testid="phase-chip"
 							data-phase="practice"
 							aria-hidden="true"
-							className="pointer-events-none flex shrink-0 select-none items-center gap-1 text-xs font-medium uppercase tracking-wide text-muted-foreground"
+							className="pointer-events-none flex shrink-0 select-none items-center gap-1 text-xs font-medium uppercase tracking-wide text-muted-foreground phone:hidden"
 						>
 							<DumbbellIcon className="size-3" />
 							Practice
 						</span>
 					) : (
-						<PhaseChip phase={phases.at(-1) ?? "probe"} />
+						// Phone: the phase label yields its width to the title
+						// (the plan sheet and the transcript dividers carry it).
+						<span className="contents phone:hidden">
+							<PhaseChip phase={phases.at(-1) ?? "probe"} />
+						</span>
 					)}
 				</TopBar>
 
@@ -2030,7 +2035,16 @@ function DockOverlay({
 		};
 		measure();
 		window.addEventListener("resize", measure);
-		return () => window.removeEventListener("resize", measure);
+		// Phone (fork: mobile-layout): a soft keyboard in a host that pans
+		// instead of resizing moves only the VISUAL viewport — the shell
+		// follows it (components/phone.ts), so the cap must too.
+		// Two frames: the shell's height variable lands on the next one.
+		const measureAfterShell = () => requestAnimationFrame(() => requestAnimationFrame(measure));
+		window.visualViewport?.addEventListener("resize", measureAfterShell);
+		return () => {
+			window.removeEventListener("resize", measure);
+			window.visualViewport?.removeEventListener("resize", measureAfterShell);
+		};
 	}, [scrollRef]);
 
 	// GROWTH MUTE (owner round, 2026-10-05 — the generation churn): during a
@@ -2274,7 +2288,7 @@ function DockOverlay({
 	return (
 		<div className="pointer-events-none absolute inset-x-0 bottom-0" style={{ right: sbInset }}>
 			<div className="h-24 bg-gradient-to-t from-background via-background/85 to-transparent" />
-			<div ref={blockRef} className="relative bg-background pb-5" style={{ "--dock-max-h": dockMaxH ? `${dockMaxH}px` : undefined } as React.CSSProperties}>
+			<div ref={blockRef} className="relative bg-background pb-5 phone:pb-[max(0.5rem,var(--lh-safe-bottom))]" style={{ "--dock-max-h": dockMaxH ? `${dockMaxH}px` : undefined } as React.CSSProperties}>
 				<div className={DOCK}>
 					{setupCta}
 					{/* The queued-steer indicator (owner spec 2026-10-03): quiet

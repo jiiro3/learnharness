@@ -155,14 +155,14 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 				    field 10 − p-1 (4) = button 6. */}
 				<div className="flex items-center justify-between gap-2 p-1">
 					<span aria-hidden className="pl-1.5 text-xs text-muted-foreground">
-						{compactionRunning ? "compacting session…" : "↵ submits · ⇧↵ newline"}
+						{compactionRunning ? "compacting session…" : <span className="phone:hidden">↵ submits · ⇧↵ newline</span>}
 					</span>
 					<Button
 						type="button"
 						data-testid="practice-send"
 						disabled={thinking.trim().length === 0 || compactionRunning}
 						onClick={() => submit()}
-						className="ml-auto h-9 rounded-[6px] px-3.5 text-sm font-medium"
+						className="ml-auto h-9 rounded-[6px] px-3.5 text-sm font-medium phone:h-11"
 					>
 						Submit thinking
 					</Button>

@@ -16,6 +16,8 @@ import { fitGraphView, fitZoomFor, zoomedGraphView, type Viewport } from "@/comp
 import type { PlanBlockData, PlanNodeStatus, PlanTree } from "@/src/core";
 import { derivedNodeStatus, derivePlanStatuses } from "@/src/core";
 import { Hint } from "@/components/ui/hint";
+import { useIsPhone } from "@/components/phone";
+import { BottomSheet } from "@/components/bottom-sheet";
 
 /**
  * PLAN BLOCKS — the plan lives in the chat (wave 4): persisted
@@ -840,7 +842,28 @@ export function PlanPopup({ messages, onClose }: { messages: readonly PopupMessa
 	// per-frame — the transition is off while dragging or it rubber-bands.
 	const [panning, setPanning] = useState(false);
 	const dragRef = useRef<{ px: number; py: number; x: number; y: number; moved: boolean } | null>(null);
+	// Two-finger pinch (fork: mobile-layout): touch pointers are tracked
+	// so a second finger turns the gesture into a zoom about the fingers'
+	// midpoint — the wheel's zoom-to-cursor, by touch. Mouse input never
+	// enters this map, so the desktop path below is unchanged.
+	const touchesRef = useRef(new Map<number, { x: number; y: number }>());
+	const pinchRef = useRef<{ dist: number } | null>(null);
+	const touchPair = () => {
+		const [a, b] = [...touchesRef.current.values()];
+		return a && b ? { a, b, dist: Math.hypot(a.x - b.x, a.y - b.y) } : null;
+	};
 	const startDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+		if (e.pointerType === "touch") {
+			touchesRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+			if (touchesRef.current.size >= 2) {
+				const pair = touchPair();
+				dragRef.current = null; // the pinch supersedes a one-finger pan
+				if (pair) pinchRef.current = { dist: pair.dist };
+				setPanning(true);
+				e.currentTarget.setPointerCapture(e.pointerId);
+				return;
+			}
+		}
 		if (e.button !== 0) return;
 		if ((e.target as HTMLElement).closest("button")) return;
 		if (atFloor) return;
@@ -850,6 +873,20 @@ export function PlanPopup({ messages, onClose }: { messages: readonly PopupMessa
 		e.currentTarget.setPointerCapture(e.pointerId);
 	};
 	const moveDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+		if (touchesRef.current.has(e.pointerId)) touchesRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+		const pinch = pinchRef.current;
+		if (pinch) {
+			const pair = touchPair();
+			const el = viewportRef.current;
+			if (!pair || !el || pair.dist < 1) return;
+			const rect = el.getBoundingClientRect();
+			const focus = { x: (pair.a.x + pair.b.x) / 2 - rect.left, y: (pair.a.y + pair.b.y) / 2 - rect.top };
+			const factor = pair.dist / pinch.dist;
+			pinch.dist = pair.dist;
+			setView((v) => zoomedGraphView(v, factor, fitZoom, focus, box, size));
+			userAdjustedRef.current = true;
+			return;
+		}
 		const d = dragRef.current;
 		if (!d) return;
 		d.moved = true;
@@ -858,6 +895,14 @@ export function PlanPopup({ messages, onClose }: { messages: readonly PopupMessa
 		);
 	};
 	const endDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+		touchesRef.current.delete(e.pointerId);
+		if (pinchRef.current) {
+			if (touchesRef.current.size < 2) {
+				pinchRef.current = null;
+				setPanning(false);
+			}
+			return;
+		}
 		const d = dragRef.current;
 		if (d) {
 			dragRef.current = null;
@@ -878,35 +923,25 @@ export function PlanPopup({ messages, onClose }: { messages: readonly PopupMessa
 
 	const markerId = useId().replace(/[^a-zA-Z0-9-]/g, "");
 
-	return (
-		<div
-			data-testid="plan-popup"
-			// SESSION-SCOPED (absolute, not fixed): the chat page mounts this
-			// INSIDE the session-area div — below the drag bar, right of the
-			// sidebar. 80% + blur: the transcript ghosts through.
-			className="absolute inset-0 z-40 flex flex-col bg-background/80 p-4 backdrop-blur-sm"
-			role="dialog"
-			aria-modal="true"
-			aria-label="The full plan"
-			onClick={(e) => {
-				if (e.target === e.currentTarget) onClose();
-			}}
-		>
+	const phone = useIsPhone();
+	const header = (
 			<div className="mb-2 flex items-center gap-2">
-				<span className="text-sm font-medium">The plan</span>
-				<span className="text-xs text-muted-foreground">live — statuses derive from your check outcomes</span>
+				<span className="shrink-0 whitespace-nowrap text-sm font-medium">The plan</span>
+				<span className="min-w-0 truncate text-xs text-muted-foreground">live — statuses derive from your check outcomes</span>
 				<Hint label="Close" binding="escape" side="left">
 <button
 					type="button"
 					onClick={onClose}
 					aria-label="Close"
 					data-testid="plan-popup-close"
-					className="ml-auto rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+					className="ml-auto shrink-0 rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground phone:flex phone:size-11 phone:items-center phone:justify-center"
 				>
 					<XIcon className="size-4" />
 				</button>
 </Hint>
 			</div>
+	);
+	const viewportEl = (
 			<div
 				ref={viewportRef}
 				className={cn(
@@ -947,14 +982,14 @@ export function PlanPopup({ messages, onClose }: { messages: readonly PopupMessa
 							/>
 						</div>
 						<div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between p-2">
-							<span className="text-xs text-muted-foreground/60">Drag to pan · scroll to zoom</span>
+							<span className="text-xs text-muted-foreground/60">{phone ? "Drag to pan · pinch to zoom" : "Drag to pan · scroll to zoom"}</span>
 							<div className="flex gap-1">
 								<Hint label="Zoom out" side="bottom">
 <button
 									type="button"
 									aria-label="Zoom out"
 									onClick={() => stepZoom(1 / 1.25)}
-									className="pointer-events-auto flex size-7 items-center justify-center rounded-md border border-border/70 bg-card/80 text-muted-foreground backdrop-blur transition-colors hover:bg-accent hover:text-foreground"
+									className="pointer-events-auto flex size-7 items-center justify-center rounded-md border border-border/70 bg-card/80 text-muted-foreground backdrop-blur transition-colors hover:bg-accent hover:text-foreground phone:size-11"
 								>
 									<MinusIcon className="size-3.5" />
 								</button>
@@ -965,7 +1000,7 @@ export function PlanPopup({ messages, onClose }: { messages: readonly PopupMessa
 									aria-label="Fit plan to screen"
 									onClick={fitView}
 									data-testid="plan-popup-fit"
-									className="pointer-events-auto flex size-7 items-center justify-center rounded-md border border-border/70 bg-card/80 text-muted-foreground backdrop-blur transition-colors hover:bg-accent hover:text-foreground"
+									className="pointer-events-auto flex size-7 items-center justify-center rounded-md border border-border/70 bg-card/80 text-muted-foreground backdrop-blur transition-colors hover:bg-accent hover:text-foreground phone:size-11"
 								>
 									<MaximizeIcon className="size-3.5" />
 								</button>
@@ -975,7 +1010,7 @@ export function PlanPopup({ messages, onClose }: { messages: readonly PopupMessa
 									type="button"
 									aria-label="Zoom in"
 									onClick={() => stepZoom(1.25)}
-									className="pointer-events-auto flex size-7 items-center justify-center rounded-md border border-border/70 bg-card/80 text-muted-foreground backdrop-blur transition-colors hover:bg-accent hover:text-foreground"
+									className="pointer-events-auto flex size-7 items-center justify-center rounded-md border border-border/70 bg-card/80 text-muted-foreground backdrop-blur transition-colors hover:bg-accent hover:text-foreground phone:size-11"
 								>
 									<PlusIcon className="size-3.5" />
 								</button>
@@ -989,6 +1024,42 @@ export function PlanPopup({ messages, onClose }: { messages: readonly PopupMessa
 					</div>
 				)}
 			</div>
+	);
+
+	// Phone (fork: mobile-layout): the plan is a BOTTOM SHEET over the
+	// session — grab handle, swipe-down/backdrop/Esc dismissal, pinch to
+	// zoom. Desktop keeps the session-scoped overlay below.
+	if (phone) {
+		return (
+			<BottomSheet
+				open
+				onClose={onClose}
+				label="The full plan"
+				testid="plan-popup"
+				panelClassName="h-[min(85dvh,calc(var(--lh-vv-h)-var(--lh-safe-top)-2rem))]"
+				header={<div className="px-4 pb-1">{header}</div>}
+			>
+				<div className="flex min-h-0 flex-1 flex-col px-3 pb-3">{viewportEl}</div>
+			</BottomSheet>
+		);
+	}
+
+	return (
+		<div
+			data-testid="plan-popup"
+			// SESSION-SCOPED (absolute, not fixed): the chat page mounts this
+			// INSIDE the session-area div — below the drag bar, right of the
+			// sidebar. 80% + blur: the transcript ghosts through.
+			className="absolute inset-0 z-40 flex flex-col bg-background/80 p-4 backdrop-blur-sm"
+			role="dialog"
+			aria-modal="true"
+			aria-label="The full plan"
+			onClick={(e) => {
+				if (e.target === e.currentTarget) onClose();
+			}}
+		>
+			{header}
+			{viewportEl}
 		</div>
 	);
 }
