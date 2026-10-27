@@ -295,6 +295,10 @@ const PICKING_PAD = 10;
 
 /** Click vs drag threshold: pointer travel under this many px is a click. */
 const CLICK_SLOP = 4;
+/** The same threshold for a finger (fork: mobile-layout): a tap wobbles
+ *  far more than a mouse click, so 4px would read most taps as pans. */
+const TOUCH_SLOP = 10;
+const slopFor = (e: PointerEvent) => (e.pointerType === "touch" ? TOUCH_SLOP : CLICK_SLOP);
 /** Live-sim tuning — see the class doc comment. */
 const LIVE_ALPHA_DECAY = 0.05; // snappier anneal than the settle's 0.0228
 const DRAG_ALPHA_TARGET = 0.3; // d3-drag's own reheat constant
@@ -611,6 +615,11 @@ export class GraphCanvasRenderer {
 	// Hover transition: fade 0 = resting, 1 = fully hovered; the animating
 	// flag keeps the loop scheduled until the fade settles (then rAF stops).
 	private hoverId: string | null = null;
+	/** Live touch pointers (fork: mobile-layout) — two or more = a pinch. */
+	private touchIds = new Set<number>();
+	/** Set once a gesture became a pinch (or a long-press menu); cleared
+	 *  when the last finger lifts. The lift is then never a tap. */
+	private pinched = false;
 	/** The node the glow is drawn on. OUTLIVES hoverId on hover-out so the
 	 *  fade has something to draw (hoverId nulls instantly; without this
 	 *  the glow popped off in one frame instead of fading). Cleared when
@@ -673,6 +682,15 @@ export class GraphCanvasRenderer {
 		// transform change just marks dirty (draws happen in OUR loop).
 		this.zoomBehavior = zoom<HTMLCanvasElement, unknown>()
 			.scaleExtent([0.02, 40])
+			// Touch (fork: mobile-layout): pointer events fire BEFORE touch
+			// events, so by touchstart a finger on a node has already claimed
+			// it (dragId) — a one-finger touch then belongs to the node drag,
+			// never also to a d3 pan. Two fingers always pinch (the second
+			// pointerdown released the node). Otherwise d3's default filter.
+			.filter((event: MouseEvent | TouchEvent) => {
+				if (event.type === "touchstart" && this.dragId && (event as TouchEvent).touches.length < 2) return false;
+				return (!event.ctrlKey || event.type === "wheel") && !(event as MouseEvent).button;
+			})
 			.on("zoom", ({ transform }) => {
 				this.transform = transform;
 				this.markDirty();
@@ -692,6 +710,7 @@ export class GraphCanvasRenderer {
 		canvas.addEventListener("pointerdown", this.onPointerDown);
 		canvas.addEventListener("pointerup", this.onPointerUp);
 		canvas.addEventListener("pointerleave", this.onPointerLeave);
+		canvas.addEventListener("pointercancel", this.onPointerCancel);
 		// Right-click → the caller's context menu (node interlude). Always
 		// preventDefault: the native menu on a full-bleed custom canvas is
 		// never useful; the caller decides what (if anything) opens.
@@ -906,6 +925,7 @@ export class GraphCanvasRenderer {
 		this.canvas.removeEventListener("pointerdown", this.onPointerDown);
 		this.canvas.removeEventListener("pointerup", this.onPointerUp);
 		this.canvas.removeEventListener("pointerleave", this.onPointerLeave);
+		this.canvas.removeEventListener("pointercancel", this.onPointerCancel);
 		this.canvas.removeEventListener("contextmenu", this.onContextMenu);
 		this.canvas.style.cursor = "";
 	}
@@ -934,7 +954,7 @@ export class GraphCanvasRenderer {
 			if (n) {
 				const moved =
 					this.dragOrigin !== null &&
-					Math.hypot(pos.x - this.dragOrigin.x, pos.y - this.dragOrigin.y) > CLICK_SLOP;
+					Math.hypot(pos.x - this.dragOrigin.x, pos.y - this.dragOrigin.y) > slopFor(e);
 				if (moved) {
 					// First real movement: reheat and glue the node to the cursor.
 					if (this.commitTimer) {
@@ -962,6 +982,15 @@ export class GraphCanvasRenderer {
 		// the right-pointerup must never read as a click (the detail card
 		// used to open under the menu).
 		if (e.button !== 0) return;
+		if (e.pointerType === "touch") {
+			this.touchIds.add(e.pointerId);
+			// A second finger: the gesture is a pinch (d3-zoom's). Release
+			// any node the first finger held and drop the pending tap.
+			if (this.touchIds.size > 1) {
+				this.releaseTouchDrag();
+				return;
+			}
+		}
 		const pos = this.eventPos(e);
 		const node = this.pickAt(pos.x, pos.y);
 		if (node && this.sim) {
@@ -993,6 +1022,16 @@ export class GraphCanvasRenderer {
 
 	private onPointerUp = (e: PointerEvent) => {
 		if (e.button !== 0) return; // right-click is context-menu territory
+		if (e.pointerType === "touch") {
+			const wasPinch = this.touchIds.size > 1 || this.pinched;
+			this.touchIds.delete(e.pointerId);
+			if (this.touchIds.size === 0) this.pinched = false;
+			if (wasPinch) {
+				// The end of a pinch / long-press is never a tap.
+				if (this.dragId) this.releaseTouchDrag(false);
+				return;
+			}
+		}
 		// Node press ending: click (no slop) → select; drag → release-and-relax.
 		if (this.dragId) {
 			const id = this.dragId;
@@ -1024,7 +1063,7 @@ export class GraphCanvasRenderer {
 		const pos = this.eventPos(e);
 		const moved = Math.hypot(pos.x - this.downPos.x, pos.y - this.downPos.y);
 		this.downPos = null;
-		if (moved > CLICK_SLOP) return; // that was a drag (pan), not a click
+		if (moved > slopFor(e)) return; // that was a drag (pan), not a click
 		const node = this.pickAt(pos.x, pos.y);
 		if (node) this.callbacks.onSelect(node.id, pos);
 		else this.callbacks.onStageClick();
@@ -1034,10 +1073,37 @@ export class GraphCanvasRenderer {
 	 *  the caller (empty stage = null — the caller closes any open menu). */
 	private onContextMenu = (e: MouseEvent) => {
 		e.preventDefault();
+		// A long-press (touch) opens the menu; its lift must not also tap.
+		if (this.touchIds.size > 0) this.pinched = true;
 		const pos = this.eventPos(e);
 		const node = this.pickAt(pos.x, pos.y);
 		this.callbacks.onContext(node?.id ?? null, pos);
 	};
+
+	/** The browser took the touch (or the finger left the screen edge):
+	 *  forget it, and settle any node it held. */
+	private onPointerCancel = (e: PointerEvent) => {
+		this.touchIds.delete(e.pointerId);
+		if (e.pointerType === "touch") this.releaseTouchDrag(false);
+		if (this.touchIds.size === 0) this.pinched = false;
+	};
+
+	/** Drop a finger's node hold without a tap (pinch start / cancel). */
+	private releaseTouchDrag(pinch = true) {
+		if (pinch) this.pinched = true;
+		this.downPos = null;
+		if (!this.dragId) return;
+		const n = this.simById.get(this.dragId);
+		if (n) {
+			n.fx = null;
+			n.fy = null;
+		}
+		this.dragId = null;
+		this.dragOrigin = null;
+		this.canvas.style.cursor = "";
+		if (this.simActive) this.sim?.alphaTarget(0);
+		this.markDirty();
+	}
 
 	private onPointerLeave = () => {
 		if (this.dragId) return; // pointer capture keeps the drag alive
