@@ -16,6 +16,8 @@ import { TOGGLE_TOOLS, AgentSection } from "../components/settings/agent-section
 import { AppearanceSection, GraphSection } from "../components/settings/appearance-section.tsx";
 import { KeysSection } from "../components/settings/keys-section.tsx";
 import { KeyboardSection } from "../components/settings/keyboard-section.tsx";
+import { AdvancedSectionBody } from "../components/settings/advanced-section.tsx";
+import { DEFAULT_RENDER_SETTINGS, type GraphRenderSettings } from "../src/core/index.ts";
 import type { GraphSettings } from "../src/core/index.ts";
 import { SettingsDialogBody, SettingsDialogProvider } from "../components/settings/settings-dialog.tsx";
 import { KEYBOARD_ACTIONS } from "../src/core/index.ts";
@@ -41,12 +43,12 @@ describe("SettingsDialog (the designed surface, SSR)", () => {
 		assert.ok(!html.includes("settings-dialog"));
 	});
 
-	it("the dialog frame: role=dialog + the ✕ + the six-section nav, Providers first and General last", () => {
+	it("the dialog frame: role=dialog + the ✕ + the section nav, Providers first and General last", () => {
 		const html = renderToStaticMarkup(<SettingsDialogBody onClose={() => {}} />);
 		assert.ok(html.includes('role="dialog"'));
 		assert.ok(html.includes('aria-modal="true"'));
 		assert.ok(html.includes('aria-label="Close settings"'));
-		for (const id of ["general", "keys", "agent", "appearance", "graph", "keyboard"]) {
+		for (const id of ["general", "keys", "agent", "appearance", "graph", "keyboard", "advanced"]) {
 			assert.ok(html.includes(`data-testid="settings-nav-${id}"`), id);
 		}
 		// Providers is the first landing section; internal keys deep links survive.
@@ -62,7 +64,7 @@ describe("SettingsDialog (the designed surface, SSR)", () => {
 	it("phone (fork: mobile-layout): the Keyboard tab is phone-hidden; the others are not", () => {
 		const html = renderToStaticMarkup(<SettingsDialogBody onClose={() => {}} />);
 		assert.ok(tagOf(html, "settings-nav-keyboard").includes("phone:hidden"));
-		for (const id of ["general", "keys", "agent", "appearance", "graph"]) {
+		for (const id of ["general", "keys", "agent", "appearance", "graph", "advanced"]) {
 			assert.ok(!tagOf(html, `settings-nav-${id}`).includes("phone:hidden"), id);
 		}
 	});
@@ -223,6 +225,60 @@ describe("GraphSection — master switch + chunk budget (wave 7 + 2026-10-02)", 
 		);
 		assert.ok(tagOf(html, "input-chunk-tokens").includes('value="6000"'));
 		assert.ok(html.includes(">6000 tok</"));
+	});
+});
+
+describe("AdvancedSection — the graph's region tuning (fork: mobile-layout)", () => {
+	const render = (settings: GraphRenderSettings) =>
+		renderToStaticMarkup(<AdvancedSectionBody settings={settings} changeSettings={() => {}} />);
+
+	it("renders the four moved knobs with the stored values", () => {
+		const html = render(DEFAULT_RENDER_SETTINGS);
+		for (const id of ["dilation", "blur", "edge-alpha", "bitmap"]) assert.ok(html.includes(`data-testid="advanced-row-${id}"`), id);
+		assert.ok(tagOf(html, "input-region-dilation").includes('type="range"'));
+		assert.ok(tagOf(html, "input-region-dilation").includes('value="50"'), "the default sits dead-center on its ladder");
+		const select = html.split('data-testid="input-region-bitmap"')[1] ?? "";
+		assert.ok(new RegExp(`<option value="${DEFAULT_RENDER_SETTINGS.regions.bitmap}" selected`).test(select));
+		assert.ok(!html.includes("advanced-regions-off"), "nothing to say while regions are on");
+		assert.ok(!tagOf(html, "advanced-row-blur").includes("opacity-40"));
+	});
+
+	it("background colors off: every row dims and locks, and says why", () => {
+		const html = render({ ...DEFAULT_RENDER_SETTINGS, regions: { ...DEFAULT_RENDER_SETTINGS.regions, enabled: false } });
+		assert.ok(html.includes('data-testid="advanced-regions-off"'));
+		for (const id of ["dilation", "blur", "edge-alpha", "bitmap"]) assert.ok(tagOf(html, `advanced-row-${id}`).includes("opacity-40"), id);
+		for (const id of ["dilation", "blur", "edge-alpha", "bitmap"]) assert.ok(tagOf(html, `input-region-${id}`).includes("disabled"), id);
+	});
+
+	it("a change patches only its own field (siblings and other sections survive)", () => {
+		let applied: GraphRenderSettings | null = null;
+		const element = AdvancedSectionBody({
+			settings: DEFAULT_RENDER_SETTINGS,
+			changeSettings: (update) => {
+				applied = update(DEFAULT_RENDER_SETTINGS);
+			},
+		});
+		// Walk to the Blur slider's onChange and fire it at ladder position 100.
+		const find = (node: unknown, testid: string): { props: Record<string, unknown> } | null => {
+			if (!node || typeof node !== "object") return null;
+			const el = node as { props?: Record<string, unknown>; type?: unknown };
+			if (el.props?.testid === testid) return el as { props: Record<string, unknown> };
+			const kids = el.props?.children;
+			for (const kid of Array.isArray(kids) ? kids : [kids]) {
+				const hit = find(kid, testid);
+				if (hit) return hit;
+			}
+			return null;
+		};
+		const blur = find(element, "input-region-blur");
+		assert.ok(blur);
+		(blur.props.onChange as (v: number) => void)(42);
+		assert.ok(applied);
+		const next = applied as GraphRenderSettings;
+		assert.equal(next.regions.blur, 42);
+		assert.equal(next.regions.dilation, DEFAULT_RENDER_SETTINGS.regions.dilation);
+		assert.equal(next.nodeSize, DEFAULT_RENDER_SETTINGS.nodeSize);
+		assert.deepEqual(next.physics, DEFAULT_RENDER_SETTINGS.physics);
 	});
 });
 

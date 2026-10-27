@@ -46,6 +46,12 @@
  * per-frame work when idle is a dirty-flag check (no rAF is scheduled at
  * all until something changes).
  *
+ * Phone (fork: mobile-layout, gated on the isPhone option): a wider pick
+ * radius plus taps on drawn labels (pickRadius), node labels floored at
+ * PHONE_MIN_LABEL_PX on screen (phoneLabelScale), and a greedy collision
+ * pass so labels never draw over each other (placeLabels). Desktop draws
+ * and picks exactly as before.
+ *
  * Unit tests cover the pure helpers (tests/graph-canvas.test.ts); the
  * class itself is DOM-bound and exercised live. Module scope stays
  * DOM-free so the file imports cleanly under Node.
@@ -294,6 +300,106 @@ const ZOOM_EASE_MS = 45; // wheel-zoom glide: exponential-ease time constant (~2
 /** Extra pickable radius (px) beyond the disc — the whole halo is
  *  hit-testable (the old flicker fix, minus the picking shader). */
 const PICKING_PAD = 10;
+/** Phone (fork: mobile-layout): a fingertip needs far more than the
+ *  halo. The pad is larger, and the hit radius never drops below a 44px
+ *  target (22px radius) however small the disc is on screen. Picking
+ *  stays nearest-first, so neighbors inside each other's radius still
+ *  resolve to the closer node. */
+const PHONE_PICKING_PAD = 16;
+const PHONE_MIN_PICK_RADIUS = 22;
+
+/** The on-screen pick radius around a node whose disc is nodeScreenR px.
+ *  Desktop: the disc + PICKING_PAD (unchanged). Phone: see above. Pure. */
+export function pickRadius(nodeScreenR: number, phone: boolean): number {
+	if (!phone) return nodeScreenR + PICKING_PAD;
+	return Math.max(nodeScreenR + PHONE_PICKING_PAD, PHONE_MIN_PICK_RADIUS);
+}
+
+/** Phone node labels (fork: mobile-layout): never smaller than this on
+ *  screen. Node labels are world-scaled, so at the zoom where they fade
+ *  in they were a few px tall on a 360-412px screen; below the floor they
+ *  grow to it (above it they scale with the graph as on desktop). */
+export const PHONE_MIN_LABEL_PX = 13;
+
+/** The factor phone node labels draw at: 1 once the world-scaled size
+ *  (labelSize × k) reaches the floor, larger below it. The wrap width is
+ *  proportional to the font size, so the pre-wrapped lines stay valid at
+ *  any factor. Desktop always draws at 1. Pure. */
+export function phoneLabelScale(labelSize: number, k: number): number {
+	const px = labelSize * k;
+	if (!(px > 0)) return 1;
+	return Math.max(1, PHONE_MIN_LABEL_PX / px);
+}
+
+/** Phone region labels wrap narrower (screen px): 220px is over half a
+ *  360px screen, so neighboring cluster names could never both fit. */
+const PHONE_REGION_LABEL_MAX_WIDTH = 160;
+
+/** Screen px kept clear around every placed label (phone collision pass). */
+const LABEL_COLLISION_GAP = 3;
+
+/** One label's screen rectangle (top-left origin), for the collision pass. */
+export interface LabelBox {
+	x: number;
+	y: number;
+	w: number;
+	h: number;
+}
+
+/** Greedy label placement (fork: mobile-layout): walk the boxes in
+ *  PRIORITY order (first = most important) and keep each one that does
+ *  not come within `gap` px of a box already kept. The result is the
+ *  keep-flag per input box: kept labels never overlap, and a label is
+ *  only ever dropped in favor of a more important one. Pure. */
+export function placeLabels(boxes: readonly LabelBox[], gap: number): boolean[] {
+	const kept: LabelBox[] = [];
+	const out: boolean[] = new Array(boxes.length);
+	for (let i = 0; i < boxes.length; i++) {
+		const b = boxes[i]!;
+		let clear = true;
+		for (const o of kept) {
+			if (
+				b.x < o.x + o.w + gap &&
+				o.x < b.x + b.w + gap &&
+				b.y < o.y + o.h + gap &&
+				o.y < b.y + b.h + gap
+			) {
+				clear = false;
+				break;
+			}
+		}
+		out[i] = clear;
+		if (clear) kept.push(b);
+	}
+	return out;
+}
+
+/** Node-label priority for the collision pass: most-connected first
+ *  (degree over the given edges; the hubs are what a zoomed-out reader
+ *  needs named), ties by the shorter label (more of them fit), then id
+ *  for a stable order frame to frame. Implication nodes never carry a
+ *  label and are left out. Pure. */
+export function nodeLabelOrder(
+	nodes: readonly { id: string; label: string }[],
+	edges: readonly { from: string; to: string }[],
+): string[] {
+	const degree = new Map<string, number>();
+	for (const e of edges) {
+		degree.set(e.from, (degree.get(e.from) ?? 0) + 1);
+		degree.set(e.to, (degree.get(e.to) ?? 0) + 1);
+	}
+	return nodes
+		.filter((n) => !isImpNodeId(n.id))
+		.map((n) => ({ id: n.id, d: degree.get(n.id) ?? 0, len: n.label.length }))
+		.sort((a, b) => b.d - a.d || a.len - b.len || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+		.map((n) => n.id);
+}
+
+/** The +/− zoom step (fork: mobile-layout): the next zoom from k by
+ *  `factor`, clamped into the scale extent. Pure. */
+export function zoomStep(k: number, factor: number): number {
+	return Math.min(Math.max(k * factor, SCALE_EXTENT[0]), SCALE_EXTENT[1]);
+}
 
 /** Click vs drag threshold: pointer travel under this many px is a click. */
 const CLICK_SLOP = 4;
@@ -760,7 +866,16 @@ export class GraphCanvasRenderer {
 	/** World rect the bitmap covers (drawImage target coords). */
 	private regionRect: { minX: number; minY: number; w: number; h: number } | null = null;
 	/** Region labels: cluster centroid + hue, computed at splat build. */
-	private regionMeta: { id: string; label: string | null; lines: string[] | null; cx: number; cy: number; hue: number }[] = [];
+	private regionMeta: {
+		id: string;
+		label: string | null;
+		lines: string[] | null;
+		cx: number;
+		cy: number;
+		hue: number;
+		/** Visible member count — the phone collision pass's priority. */
+		members: number;
+	}[] = [];
 	private regionTuning: RegionTuning = DEFAULT_REGION_TUNING;
 	private physicsTuning: PhysicsTuning = DEFAULT_PHYSICS_TUNING;
 	/** Gravity center for the live sim (graph bbox centroid at setData). */
@@ -768,6 +883,22 @@ export class GraphCanvasRenderer {
 	private regionBuiltVersion = -1;
 	private frameCount = 0; // draw counter for the live-sim splat throttle
 	private labelLines = new Map<string, string[]>();
+	/** Phone only: each node label's widest line, world units at the base
+	 *  label size (the collision pass scales it per frame). */
+	private labelWidths = new Map<string, number>();
+	/** Phone only: node ids in label priority order (nodeLabelOrder),
+	 *  computed per setData — positions never change it. */
+	private labelOrder: string[] = [];
+	/** Phone only: the node labels the last frame drew, as screen rects —
+	 *  a tap on a drawn label picks its node. */
+	private drawnLabelBoxes: (LabelBox & { id: string })[] = [];
+	/** Phone only: region-label line widths (screen px at the cluster
+	 *  label size), keyed by font + text; cleared when the font changes. */
+	private regionLineWidths = new Map<string, number>();
+	private regionWidthFont = "";
+	/** Whether the cached geometry was built for the phone layout (the
+	 *  region-label wrap width differs); a flip forces a rebuild. */
+	private geoPhone = false;
 	private worldLabelFont = "";
 	private world: WorldSizes = { nodeR: 0, glowOuter: 0, labelSize: 0, labelGap: 0 };
 
@@ -786,6 +917,7 @@ export class GraphCanvasRenderer {
 		options?: { isPhone?: () => boolean },
 	) {
 		this.isPhone = options?.isPhone ?? (() => false);
+		this.geoPhone = this.isPhone();
 		this.canvas = canvas;
 		const ctx = canvas.getContext("2d");
 		if (!ctx) throw new Error("2d context unavailable");
@@ -937,6 +1069,7 @@ export class GraphCanvasRenderer {
 			if (n.y > maxY) maxY = n.y;
 		}
 		this.worldBBox = { minX, maxX, minY, maxY };
+		this.labelOrder = nodeLabelOrder(data.nodes, data.logicalEdges ?? data.edges);
 		if (!this.hasFit && data.nodes.length > 0) this.fit();
 		// The camera may be user-restored (constructor initialCamera) — the
 		// gate's "1×" reference still needs the fresh bbox's fit zoom.
@@ -1029,7 +1162,7 @@ export class GraphCanvasRenderer {
 			data.clusters,
 			this.regionMeta,
 			labels,
-			REGION_LABEL_MAX_WIDTH,
+			this.geoPhone ? PHONE_REGION_LABEL_MAX_WIDTH : REGION_LABEL_MAX_WIDTH,
 			REGION_LABEL_MAX_LINES,
 			(s) => ctx.measureText(s).width,
 		);
@@ -1065,6 +1198,17 @@ export class GraphCanvasRenderer {
 	recenter(): void {
 		this.zoomTarget = null;
 		this.fit();
+	}
+
+	/** The +/− controls (fork: mobile-layout): zoom by `factor` about the
+	 *  viewport center, on the same eased glide the wheel uses. Repeated
+	 *  taps compound from the glide's target, not the half-done camera. */
+	zoomBy(factor: number): void {
+		if (this.viewW < 10 || this.viewH < 10) return;
+		const k = zoomStep(this.zoomTarget?.k ?? this.transform.k, factor);
+		this.zoomTarget = { k, x: this.viewW / 2, y: this.viewH / 2 };
+		this.lastTickAt = performance.now();
+		this.markDirty();
 	}
 
 	/** Take the camera to these nodes (search matches — fork:
@@ -1164,6 +1308,9 @@ export class GraphCanvasRenderer {
 			}
 			return;
 		}
+		// Phone: a finger has no hover — a pan sweeping over nodes (with the
+		// phone's wide pick radius) would only flash glows along its path.
+		if (e.pointerType === "touch" && this.isPhone()) return;
 		const node = this.pickAt(pos.x, pos.y);
 		if ((node?.id ?? null) !== this.hoverId) this.setHover(node?.id ?? null);
 		this.canvas.style.cursor = node ? "pointer" : "";
@@ -1320,7 +1467,8 @@ export class GraphCanvasRenderer {
 		// nodeSize is world units now (2026-09-15): the on-screen hit radius
 		// is the disc's world radius × the camera zoom, plus the constant
 		// screen pad — the whole halo stays hit-testable.
-		const maxDist = this.settings.nodeSize * k + PICKING_PAD;
+		const phone = this.isPhone();
+		const maxDist = pickRadius(this.settings.nodeSize * k, phone);
 		const projected: { id: string; x: number; y: number }[] = [];
 		for (const n of this.data.nodes) {
 			if (this.visible && !this.visible.has(n.id)) continue;
@@ -1328,8 +1476,15 @@ export class GraphCanvasRenderer {
 			projected.push({ id: n.id, x: n.x * k + tx, y: n.y * k + ty });
 		}
 		const hit = pickNearest(projected, px, py, maxDist);
-		if (!hit) return null;
-		return this.nodeById.get(hit.id) ?? null;
+		if (hit) return this.nodeById.get(hit.id) ?? null;
+		// Phone: a drawn label is part of its node's target (the label is
+		// what the reader aims at). Only labels the last frame showed.
+		if (phone) {
+			for (const b of this.drawnLabelBoxes) {
+				if (px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h) return this.nodeById.get(b.id) ?? null;
+			}
+		}
+		return null;
 	}
 
 	private setHover(nodeId: string | null): void {
@@ -1553,8 +1708,17 @@ export class GraphCanvasRenderer {
 		const prevFont = ctx.font;
 		ctx.font = this.worldLabelFont;
 		const maxW = LABEL_MAX_WIDTH * (settings.labelSize / LABEL_SIZE);
+		this.labelWidths = new Map();
 		for (const n of data.nodes) {
-			if (isVisible(n.id) && !isImpNodeId(n.id)) this.labelLines.set(n.id, wrapLabel(ctx, n.label, maxW));
+			if (!isVisible(n.id) || isImpNodeId(n.id)) continue;
+			const lines = wrapLabel(ctx, n.label, maxW);
+			this.labelLines.set(n.id, lines);
+			// Phone: the collision pass needs each label's footprint.
+			if (this.geoPhone) {
+				let widest = 0;
+				for (const line of lines) widest = Math.max(widest, ctx.measureText(line).width);
+				this.labelWidths.set(n.id, widest);
+			}
 		}
 		ctx.font = prevFont;
 	}
@@ -1674,6 +1838,7 @@ export class GraphCanvasRenderer {
 					cy: sumY / members,
 					hue: clusterHue(cluster.id),
 					lines: null,
+					members,
 				});
 			}
 		});
@@ -1688,9 +1853,10 @@ export class GraphCanvasRenderer {
 			const ctx = this.ctx;
 			const prevFont = ctx.font;
 			ctx.font = `${LABEL_WEIGHT} ${settings.clusterLabelSize}px ${data.fontFamily}`;
+			const maxWidth = this.geoPhone ? PHONE_REGION_LABEL_MAX_WIDTH : REGION_LABEL_MAX_WIDTH;
 			for (const rm of this.regionMeta) {
 				rm.lines = rm.label
-					? wrapRegionLabel(rm.label, REGION_LABEL_MAX_WIDTH, REGION_LABEL_MAX_LINES, (s) => ctx.measureText(s).width)
+					? wrapRegionLabel(rm.label, maxWidth, REGION_LABEL_MAX_LINES, (s) => ctx.measureText(s).width)
 					: null;
 			}
 			ctx.font = prevFont;
@@ -1857,6 +2023,95 @@ export class GraphCanvasRenderer {
 		this.regionRect = { minX, minY, w: spanX, h: spanY };
 	}
 
+	/** Phone: which labels draw this frame. Every on-screen label becomes
+	 *  a screen rect; the more opaque kind (node vs region labels, which
+	 *  cross-fade on the zoom gate) is placed first, each kind in its own
+	 *  priority order (regions: most members; nodes: nodeLabelOrder), and
+	 *  placeLabels drops anything that would overlap a label already
+	 *  kept. Also records the kept node-label rects for tap picking. */
+	private planPhoneLabels(
+		settings: GraphRenderSettings,
+		data: CanvasData,
+		nodeAlpha: number,
+		regionAlpha: number,
+		scale: number,
+		w: number,
+		h: number,
+	): { nodes: Set<string>; regions: Set<string> } {
+		const { x: tx, y: ty, k } = this.transform;
+		const offscreen = (b: LabelBox) => b.x > w || b.x + b.w < 0 || b.y > h || b.y + b.h < 0;
+		const nodeBoxes: (LabelBox & { id: string })[] = [];
+		if (nodeAlpha > 0.01) {
+			const size = settings.labelSize * scale * k; // screen px
+			const lineH = size * LABEL_LINE_HEIGHT;
+			const gap = LABEL_GAP * scale;
+			for (const id of this.labelOrder) {
+				const lines = this.labelLines.get(id);
+				const n = this.nodeById.get(id);
+				if (!lines || lines.length === 0 || !n) continue;
+				const bw = (this.labelWidths.get(id) ?? 0) * scale * k;
+				const box = {
+					id,
+					x: n.x * k + tx - bw / 2,
+					y: (n.y + this.world.nodeR + gap) * k + ty,
+					w: bw,
+					h: lineH * (lines.length - 1) + size,
+				};
+				if (!offscreen(box)) nodeBoxes.push(box);
+			}
+		}
+		const regionBoxes: (LabelBox & { id: string })[] = [];
+		if (settings.clusterLabels && regionAlpha > 0.01) {
+			const font = `${LABEL_WEIGHT} ${settings.clusterLabelSize}px ${data.fontFamily}`;
+			if (font !== this.regionWidthFont) {
+				this.regionLineWidths.clear();
+				this.regionWidthFont = font;
+			}
+			const ctx = this.ctx;
+			const prevFont = ctx.font;
+			ctx.font = font;
+			const size = settings.clusterLabelSize;
+			const lineH = size * REGION_LABEL_LINE_HEIGHT;
+			const ordered = this.regionMeta
+				.filter((rm) => rm.lines && rm.lines.length > 0)
+				.sort((a, b) => b.members - a.members || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+			for (const rm of ordered) {
+				const lines = rm.lines!;
+				let bw = 0;
+				for (const line of lines) {
+					let lw = this.regionLineWidths.get(line);
+					if (lw === undefined) {
+						lw = ctx.measureText(line).width;
+						this.regionLineWidths.set(line, lw);
+					}
+					bw = Math.max(bw, lw);
+				}
+				const bh = lineH * (lines.length - 1) + size;
+				const box = { id: rm.id, x: rm.cx * k + tx - bw / 2, y: rm.cy * k + ty - bh / 2, w: bw, h: bh };
+				if (!offscreen(box)) regionBoxes.push(box);
+			}
+			ctx.font = prevFont;
+		}
+		const nodesFirst = nodeAlpha >= regionAlpha;
+		const first = nodesFirst ? nodeBoxes : regionBoxes;
+		const all = nodesFirst ? [...nodeBoxes, ...regionBoxes] : [...regionBoxes, ...nodeBoxes];
+		const keep = placeLabels(all, LABEL_COLLISION_GAP);
+		const nodes = new Set<string>();
+		const regions = new Set<string>();
+		const drawn: (LabelBox & { id: string })[] = [];
+		for (let i = 0; i < all.length; i++) {
+			if (!keep[i]) continue;
+			const isNode = nodesFirst ? i < first.length : i >= first.length;
+			if (isNode) {
+				nodes.add(all[i]!.id);
+				drawn.push(all[i]!);
+			} else regions.add(all[i]!.id);
+		}
+		// Tappable only while the labels read as present (not mid-fade).
+		this.drawnLabelBoxes = nodeAlpha > 0.5 ? drawn : [];
+		return { nodes, regions };
+	}
+
 	/** THE draw function: every layer, one frame, one camera. All drawing
 	 *  happens in WORLD coordinates under the camera transform; nothing is
 	 *  recomputed per frame except layer styling. */
@@ -1872,6 +2127,14 @@ export class GraphCanvasRenderer {
 
 		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 		ctx.clearRect(0, 0, w, h);
+
+		// Phone layout flips (a resize across the phone line) rebuild the
+		// geometry: the region-label wrap width and label footprints differ.
+		const phone = this.isPhone();
+		if (phone !== this.geoPhone) {
+			this.geoPhone = phone;
+			this.geoVersion++;
+		}
 
 		this.frameCount++;
 		// Regions: rebuild on stale geometry at rest; during the live sim,
@@ -1924,16 +2187,36 @@ export class GraphCanvasRenderer {
 		ctx.fillStyle = data.colors.node;
 		ctx.fill(this.nodesPath);
 
+		// Phone (fork: mobile-layout): node labels draw at least
+		// PHONE_MIN_LABEL_PX tall, and a collision pass decides which
+		// labels (node AND region) draw at all — no two ever overlap.
+		// Desktop: scale 1, no pass, every label draws (unchanged).
+		const labelScale = phone ? phoneLabelScale(settings.labelSize, k) : 1;
+		const labelWorld: WorldSizes = phone
+			? { ...this.world, labelSize: settings.labelSize * labelScale, labelGap: LABEL_GAP * labelScale }
+			: this.world;
+		const labelFont = phone ? `${LABEL_WEIGHT} ${labelWorld.labelSize}px ${data.fontFamily}` : this.worldLabelFont;
+		const plan = phone ? this.planPhoneLabels(settings, data, nodeAlpha, regionAlpha, labelScale, w, h) : null;
+		if (!plan) this.drawnLabelBoxes = [];
+
 		// 6. Node labels — one global gate, faded together. World-scaled
 		// with the graph (they grow as you zoom in, Obsidian-style).
 		if (nodeAlpha > 0.01) {
 			ctx.save();
 			ctx.globalAlpha = nodeAlpha;
-			ctx.font = this.worldLabelFont;
-			for (const [id, lines] of this.labelLines) {
-				const n = this.nodeById.get(id);
-				if (!n) continue;
-				drawNameLines(ctx, n.x, n.y, lines, this.world, data.colors.label);
+			ctx.font = labelFont;
+			if (plan) {
+				for (const id of plan.nodes) {
+					const n = this.nodeById.get(id);
+					const lines = this.labelLines.get(id);
+					if (n && lines) drawNameLines(ctx, n.x, n.y, lines, labelWorld, data.colors.label);
+				}
+			} else {
+				for (const [id, lines] of this.labelLines) {
+					const n = this.nodeById.get(id);
+					if (!n) continue;
+					drawNameLines(ctx, n.x, n.y, lines, this.world, data.colors.label);
+				}
 			}
 			ctx.restore();
 		}
@@ -1957,8 +2240,8 @@ export class GraphCanvasRenderer {
 				ctx.fill("evenodd");
 				ctx.save();
 				ctx.globalAlpha = this.hoverFade;
-				ctx.font = this.worldLabelFont;
-				drawNameLines(ctx, n.x, n.y, this.labelLines.get(n.id) ?? [], this.world, data.colors.hoverText);
+				ctx.font = labelFont;
+				drawNameLines(ctx, n.x, n.y, this.labelLines.get(n.id) ?? [], labelWorld, data.colors.hoverText);
 				ctx.restore();
 			}
 		}
@@ -1984,6 +2267,7 @@ export class GraphCanvasRenderer {
 			const lineH = (settings.clusterLabelSize * REGION_LABEL_LINE_HEIGHT) / k;
 			for (const rm of this.regionMeta) {
 				if (!rm.lines) continue;
+				if (plan && !plan.regions.has(rm.id)) continue; // phone: lost the collision pass
 				ctx.fillStyle = `hsla(${rm.hue}, 55%, 78%, 0.85)`;
 				const firstOffset = (-(rm.lines.length - 1) / 2) * lineH;
 				for (let i = 0; i < rm.lines.length; i++) {
