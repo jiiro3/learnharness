@@ -29,6 +29,17 @@ describe("QueuedSteersBody (the quiet queue above the composer)", () => {
 		assert.match(html, /also cover Venus/, "the text rides the line");
 	});
 
+	it("phone (labelled): each steer says it is queued and will send after this reply", () => {
+		const html = renderToStaticMarkup(
+			<QueuedSteersBody labelled steers={[{ id: "steer_a", text: "also cover Venus" }]} />,
+		);
+		assert.match(html, /data-testid="queued-steers"/);
+		assert.match(html, /role="status"/);
+		assert.match(html, /Queued · sends after this reply/);
+		assert.match(html, /also cover Venus/);
+		assert.equal(renderToStaticMarkup(<QueuedSteersBody labelled steers={[]} />), "");
+	});
+
 	it("empty queue renders nothing", () => {
 		assert.equal(renderToStaticMarkup(<QueuedSteersBody steers={[]} />), "");
 	});

@@ -1,9 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { subscriptionLabels, subscriptionLabel, type SessionPricing, type TurnUsage } from "@/src/core";
 import { formatTokens, formatUsd, planCostLabel, prettyModel } from "@/components/usage-format";
 import { ModelControl, catalogLimits, useModelCatalog } from "@/components/model-picker";
+import { isPhoneNow } from "@/components/phone";
+
+/** Phone viewport gutter for the stats popover (matches MenuShell's clamp). */
+const PHONE_EDGE = 8;
+/** The popover's desktop width (w-72). */
+const POPOVER_WIDTH = 288;
 
 export function formatContextMeasurement(tokens: number | null, limit: number | null): string {
 	const numerator = tokens === null ? "?" : formatTokens(tokens);
@@ -79,6 +85,27 @@ export function StatsBar({
 			document.removeEventListener("keydown", onKeyDown);
 		};
 	}, [open]);
+	// Phone: the centered popover ran off the left edge (the summary sits at
+	// the row's left). Left-align it to the button and clamp it inside 8px
+	// viewport gutters. Desktop keeps the centered placement untouched.
+	const [phonePlacement, setPhonePlacement] = useState<CSSProperties | undefined>();
+	useLayoutEffect(() => {
+		if (!open || !isPhoneNow() || !barRef.current) {
+			setPhonePlacement(undefined);
+			return;
+		}
+		const place = () => {
+			const anchor = barRef.current?.getBoundingClientRect();
+			if (!anchor) return;
+			const vw = window.innerWidth;
+			const width = Math.min(POPOVER_WIDTH, vw - 2 * PHONE_EDGE);
+			const left = Math.min(Math.max(anchor.left, PHONE_EDGE), vw - PHONE_EDGE - width);
+			setPhonePlacement({ left: left - anchor.left, width, translate: "none" });
+		};
+		place();
+		window.addEventListener("resize", place);
+		return () => window.removeEventListener("resize", place);
+	}, [open]);
 	// Catalog-only denominator; the picker reports its effective selection.
 	// Missing/pending catalog means usage-only, never a hardcoded maximum.
 	const { catalog } = useModelCatalog();
@@ -113,7 +140,7 @@ export function StatsBar({
 			{/* The left side: the session-data summary — only once a session
 			    exists (turns). Pre-chat renders nothing (see the header). */}
 			{(chatId || turns.length > 0) && (
-			<div ref={barRef} className="relative">
+			<div ref={barRef} className="relative phone:shrink-0 phone:whitespace-nowrap">
 				{/* No tooltip — the numbers describe themselves and the popover
 			    speaks on click (owner, subtlety round 2026-09-25). */}
 			<button
@@ -132,7 +159,8 @@ export function StatsBar({
 				{open && (
 					<div
 						data-testid="stats-detail"
-						className="absolute bottom-full left-1/2 z-40 mb-1.5 w-72 -translate-x-1/2 rounded-xl border bg-card p-3 text-xs shadow-xl"
+						style={phonePlacement}
+						className="absolute bottom-full left-1/2 z-40 mb-1.5 w-72 -translate-x-1/2 rounded-xl border bg-card p-3 text-xs shadow-xl phone:left-0 phone:max-w-[calc(100vw-1rem)] phone:translate-x-0 phone:whitespace-normal"
 					>
 						<div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
 							Session stats
@@ -187,7 +215,7 @@ export function StatsBar({
 			    meter expand into the row's free width; justify-center keeps the
 			    lone idle mic button visually centered. */}
 			{dictationSlot && (
-				<div className="flex min-w-0 flex-1 items-center justify-center">{dictationSlot}</div>
+				<div className="flex min-w-0 flex-1 items-center justify-center phone:min-w-min">{dictationSlot}</div>
 			)}
 			{/* The model + thinking control — one controller for the conversation
 			    agents (prober/teacher); the record's `turns` above still folds

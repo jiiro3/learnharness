@@ -338,11 +338,14 @@ export function ChainTableBody({
 							{open && group.chains.length > 0 && (
 								<div
 									data-testid={`cluster-thread-${group.key}`}
-									className="pointer-events-none absolute bottom-[8px] left-[37px] top-[23px] w-px bg-border/50"
+									className="pointer-events-none absolute bottom-[8px] left-[37px] top-[23px] w-px bg-border/50 phone:bottom-[15px] phone:left-[54px] phone:top-[29px]"
 								/>
 							)}
 							{/* The cluster row: birth-session group header. */}
-							<div className="flex items-center gap-1 px-3 py-1.5">
+							{/* Phone (fork: mobile-layout): 44px rows so every control
+							    gets a 44×44 hit area (PHONE_HIT below); the controls
+							    keep their visual size, the indents grow to fit. */}
+							<div className="flex items-center gap-1 px-3 py-1.5 phone:min-h-11 phone:py-0 phone:pl-[15px]">
 								<RowCheckbox
 									checked={selectedCount === group.nodeIds.length && group.nodeIds.length > 0}
 									indeterminate={selectedCount > 0 && selectedCount < group.nodeIds.length}
@@ -384,13 +387,13 @@ export function ChainTableBody({
 												{chainOpen && memberIds.length > 0 && (
 													<div
 														data-testid={`chain-thread-${chain.id}`}
-														className="pointer-events-none absolute bottom-[8px] left-[73px] top-[22px] w-px bg-border/50"
+														className="pointer-events-none absolute bottom-[8px] left-[73px] top-[22px] w-px bg-border/50 phone:bottom-[15px] phone:left-[104px] phone:top-[29px]"
 													/>
 												)}
 											<div
 												data-testid={`chain-row-${chain.id}`}
 												aria-label={formatChainLine(chain, Object.fromEntries([...byId.entries()].map(([id, n]) => [id, { name: n.name }])))}
-												className="flex items-center gap-1 py-1 pl-12 pr-3"
+												className="flex items-center gap-1 py-1 pl-12 pr-3 phone:min-h-11 phone:py-0 phone:pl-[65px]"
 											>
 												<RowCheckbox
 													checked={selectedInChain === memberIds.length && memberIds.length > 0}
@@ -459,7 +462,7 @@ export function ChainTableBody({
 														<div
 															key={id}
 															data-testid={`prop-row-${id}`}
-															className="flex items-start gap-2 py-1 pl-21 pr-3"
+															className="flex items-start gap-2 py-1 pl-21 pr-3 phone:min-h-11 phone:pb-[9px] phone:pl-[115px] phone:pt-[15px]"
 														>
 															<RowCheckbox
 																checked={selection.has(id)}
@@ -541,6 +544,19 @@ export function ChainTableBody({
 	);
 }
 
+/* PHONE HIT AREAS (fork: mobile-layout). Every checkbox and chevron gets
+   a 44×44 target on phone while keeping its 14px look:
+   - the checkbox sits in a label padded 15px all round and pulled back
+     15px by negative margins (zero layout change around it); on desktop
+     the label is display:contents — no box at all;
+   - the chevron gets a ::before 44×44 that starts 3px left of it and runs
+     right over the passive folder icon / chain line — the 14px extra gap
+     (ml) keeps it clear of the checkbox's area.
+   Phone geometry (x of each 14px control): cluster checkbox 15, chevron
+   47 (thread 54); chain checkbox 65, chevron 97 (thread 104); statement
+   checkbox 115. Rows are ≥44px and the controls sit 15px from the top,
+   so the threads run from y 29 to 15px above the last row's bottom. */
+
 /** The rotating chevron — collapsed points right, expanded rotates down
  *  (owner ruling: the affordance must read on every expandable row). */
 function Expander({ open, onClick, testid, label }: { open: boolean; onClick: () => void; testid: string; label: string }) {
@@ -551,7 +567,7 @@ function Expander({ open, onClick, testid, label }: { open: boolean; onClick: ()
 			onClick={onClick}
 			aria-label={label}
 			aria-expanded={open}
-			className="flex h-5 w-3.5 shrink-0 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
+			className="flex h-5 w-3.5 shrink-0 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground phone:relative phone:ml-[14px] phone:before:absolute phone:before:-inset-y-3 phone:before:-left-[3px] phone:before:-right-[27px] phone:before:content-['']"
 		>
 			<ChevronRightIcon className={`size-3.5 transition-transform ${open ? "rotate-90" : ""}`} />
 		</button>
@@ -574,17 +590,21 @@ function RowCheckbox({
 	label: string;
 }) {
 	return (
-		<input
-			type="checkbox"
-			checked={checked}
-			ref={(el) => {
-				if (el) el.indeterminate = indeterminate;
-			}}
-			data-testid={testid}
-			aria-label={label}
-			onChange={(e) => onToggle(e.target.checked)}
-			className="size-3.5 shrink-0 accent-primary"
-		/>
+		// The phone hit area (see PHONE HIT AREAS above); a no-box
+		// display:contents wrapper on desktop.
+		<label className="contents phone:-m-[15px] phone:flex phone:shrink-0 phone:p-[15px]">
+			<input
+				type="checkbox"
+				checked={checked}
+				ref={(el) => {
+					if (el) el.indeterminate = indeterminate;
+				}}
+				data-testid={testid}
+				aria-label={label}
+				onChange={(e) => onToggle(e.target.checked)}
+				className="size-3.5 shrink-0 accent-primary"
+			/>
+		</label>
 	);
 }
 

@@ -462,7 +462,7 @@ export interface QuestionAnswerData {
 	 *  2026-10-03) — a separate channel from `thinking`, captured by the
 	 *  reading field and riding the check answer. Absent when empty. */
 	readingThinking?: string;
-	confidence?: number; // quiz only: the learner's stated probability (0-100, raw) that his selected answer is correct — never sent on "I don't know" (owner, 2026-10-01)
+	confidence?: number; // quiz only: the learner's stated probability (0-100, raw) that his selected answer is correct — never sent on "I don't know" (owner, 2026-10-01); ABSENT when he never touched the slider ("not set", 2026-10-26). Older records always carry a number.
 	correct?: boolean; // quiz only
 	correctIndices?: number[]; // quiz only (rendering)
 	committed?: string; // explain only (rendering): the model's committed answer
@@ -489,16 +489,38 @@ export interface AnswerRequest {
 	text?: string; // ask text-mode
 	thinking?: string; // the reasoning-on-the-question channel (was `note`)
 	readingThinking?: string; // the thinking-while-reading channel (check answers)
-	confidence?: number; // quiz only: 0-100 raw probability — 50 is a real coin flip, always sent (owner, 2026-10-01)
+	confidence?: number; // quiz only: 0-100 raw probability — 50 is a real coin flip. Absent = "not set": the learner never touched the slider (2026-10-26; it used to rest at 50 and always send)
 }
 
 /** The confidence slider's snap stops (owner, 2026-10-01): raw probability
  *  that the selected answer is correct, uneven on purpose — resolution
  *  concentrates at the top where the calibration signal lives (90 vs 100
- *  separates knows from mastered). 50 is a genuine coin flip and the
- *  resting default — untouched and deliberate 50 are the same number. */
+ *  separates knows from mastered). 50 is a genuine coin flip.
+ *
+ *  The slider starts UNSET (2026-10-26): an untouched slider records no
+ *  confidence at all, so a deliberate 50 is never confused with "didn't
+ *  move it". The first ←/→ press lands on the middle stop (50) — the
+ *  slider wakes up where the eye expects it — and moves from there. */
 export const CONFIDENCE_STOPS: readonly number[] = [0, 30, 50, 70, 90, 100];
-export const DEFAULT_CONFIDENCE_INDEX = 2;
+export const CONFIDENCE_MIDDLE_INDEX = 2;
+
+/** One ←/→ step on the confidence slider: from unset (null) the first
+ *  press lands on the middle stop; after that it walks the stops,
+ *  clamped at the ends. Pure — exported for tests. */
+export function stepConfidenceIndex(current: number | null, dir: -1 | 1): number {
+	if (current === null) return CONFIDENCE_MIDDLE_INDEX;
+	return Math.min(CONFIDENCE_STOPS.length - 1, Math.max(0, current + dir));
+}
+
+/** Snap a raw 0–100 slider value to the nearest stop's index. Pure —
+ *  exported for tests. */
+export function nearestConfidenceIndex(value: number): number {
+	let best = 0;
+	for (let i = 1; i < CONFIDENCE_STOPS.length; i++) {
+		if (Math.abs(CONFIDENCE_STOPS[i]! - value) < Math.abs(CONFIDENCE_STOPS[best]! - value)) best = i;
+	}
+	return best;
+}
 
 // ─── dock selection (the client state machine, pure for tests) ─────────────
 
@@ -518,7 +540,8 @@ export interface QuestionFormDraft {
 	thinking: string;
 	other: string;
 	text: string;
-	confidenceIndex: number;
+	/** null = the slider was never touched ("not set"). */
+	confidenceIndex: number | null;
 }
 
 export interface QuestionDraft {
@@ -736,9 +759,12 @@ export function buildAnswer(qd: QuestionData, req: AnswerRequest, tool?: string)
 		base.explanation = qd.explanation;
 		base.correct = base.dontKnow ? false : isCorrect(base.answers.map((a) => a.index), qd.correctIndices ?? []);
 		// The confidence slider rides on real quiz answers only — never on
-		// "I don't know" (no answer, no probability). Clamped defensively;
-		// the dock snaps to the grid, the record accepts any integer.
-		if (!base.dontKnow && req.confidence !== undefined) {
+		// "I don't know" (no answer, no probability), and never when the
+		// learner left it untouched (absent = "not set"; a null from the
+		// wire is treated the same — Math.round(null) would mint a 0).
+		// Clamped defensively; the dock snaps to the grid, the record
+		// accepts any integer.
+		if (!base.dontKnow && typeof req.confidence === "number" && Number.isFinite(req.confidence)) {
 			base.confidence = Math.max(0, Math.min(100, Math.round(req.confidence)));
 		}
 	}
@@ -788,9 +814,11 @@ export function compactAnswerForModel(ad: QuestionAnswerData): Record<string, un
 	if (ad.other) out.other = ad.other;
 	// The verdict + stated confidence are the learner's PERFORMANCE — new
 	// information the model needs for its next move. (dontKnow implies
-	// incorrect and carries no confidence: both stay implicit.)
+	// incorrect and carries no confidence: both stay implicit.) A quiz
+	// answer whose slider was never touched carries NO confidence key —
+	// absent means "not set", never a default 50 (2026-10-26).
 	if (ad.correct !== undefined && !ad.dontKnow) out.correct = ad.correct;
-	if (ad.confidence !== undefined) out.confidence = ad.confidence;
+	if (typeof ad.confidence === "number") out.confidence = ad.confidence;
 	// Two DISTINCT thinking channels, clearly keyed so the model never
 	// conflates them (owner 2026-10-03): reasoning on the question vs
 	// thinking while reading the teaching. `note` is the pre-rename key —

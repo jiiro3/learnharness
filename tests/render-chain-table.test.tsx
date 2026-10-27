@@ -145,7 +145,12 @@ describe("ChainTableBody — THE shared TopBar + the lines law (owner, round 2)"
 		// chain rows themselves carry NO border — their entire class list is
 		// the staircase law (pl-12 = aligned with the cluster's FOLDER icon);
 		// the chip outlines' border-border/70 is an outline, not a row line
-		assert.ok(html.includes('class="flex items-center gap-1 py-1 pl-12 pr-3"'), "the chain row: staircase indent, no border");
+		// (fork: mobile-layout: the phone-only tail — 44px rows, the wider
+		// phone indent — follows the unchanged desktop list, never a border)
+		const row = html.match(/data-testid="chain-row-[^"]*"[^>]*class="([^"]*)"/)?.[1] ?? "";
+		assert.ok(row.startsWith("flex items-center gap-1 py-1 pl-12 pr-3"), "the chain row: staircase indent, no border");
+		assert.ok(row.split(" ").filter((c) => !c.startsWith("phone:")).join(" ") === "flex items-center gap-1 py-1 pl-12 pr-3", "desktop classes unchanged");
+		assert.ok(!row.includes("border"), "no row border, phone included");
 	});
 
 	it("TREE THREADS: open folders/chains drop a vertical guide from their expander arrow down the children's edge (owner round 5)", () => {

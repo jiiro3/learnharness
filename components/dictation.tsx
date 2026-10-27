@@ -1,8 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Loader2Icon, MicIcon } from "lucide-react";
 import { useSettingsDialog } from "@/components/settings/settings-dialog";
+import { useSettingsSaved } from "@/components/settings-signal";
+import { useIsPhone } from "@/components/phone";
 import { Hint } from "@/components/ui/hint";
 
 /**
@@ -122,12 +124,52 @@ export const DICTATION_KEYLESS = "Dictation needs a Deepgram key";
  *  (zero-keys wave, owner 2026-09-25). */
 async function mintFreshToken(): Promise<string> {
 	const res = await fetch("/api/stt/token");
+	// The route answered: its 503 is the keyless one, anything else means a
+	// key exists (a failed mint with a key is still an honest error to show).
+	setDeepgramKey(res.status === 503 ? "absent" : "present");
 	const data = (await res.json()) as { token?: string; message?: string };
 	if (!res.ok || !data.token) {
 		if (res.status === 503) throw new Error(DICTATION_KEYLESS);
 		throw new Error(data.message ?? `token route ${res.status}`);
 	}
 	return data.token;
+}
+
+/** Does the server hold a Deepgram key? (fork: mobile-layout) Learned as a
+ *  side effect of the token mints the page already makes (mount pre-mint,
+ *  run end, the keys-saved re-mint) — no extra request. "unknown" until
+ *  the first mint answers, and while the route is unreachable. */
+export type DeepgramKeyState = "unknown" | "present" | "absent";
+let deepgramKey: DeepgramKeyState = "unknown";
+const deepgramKeyListeners = new Set<() => void>();
+function setDeepgramKey(next: DeepgramKeyState): void {
+	if (next === deepgramKey) return;
+	deepgramKey = next;
+	for (const listener of deepgramKeyListeners) listener();
+}
+function subscribeDeepgramKey(listener: () => void): () => void {
+	deepgramKeyListeners.add(listener);
+	return () => deepgramKeyListeners.delete(listener);
+}
+
+/** Can this page capture audio at all? getUserMedia exists only in a
+ *  secure context (https or localhost); a phone loading the app over
+ *  plain http from the LAN has no navigator.mediaDevices. */
+export function canCaptureAudio(): boolean {
+	return (
+		typeof window !== "undefined" &&
+		window.isSecureContext === true &&
+		typeof navigator !== "undefined" &&
+		typeof navigator.mediaDevices?.getUserMedia === "function"
+	);
+}
+
+/** Phone only: offer the mic only when it can work — a Deepgram key is
+ *  configured AND the page can capture audio. Pending ("unknown") hides
+ *  too, so the button never flashes in and back out. Desktop keeps the
+ *  always-offered button and its keyless deep-link. */
+export function phoneOffersDictation(key: DeepgramKeyState, canCapture: boolean): boolean {
+	return key === "present" && canCapture;
 }
 
 /** Warm-token cache (mitigation D, owner 2026-09-27): the click path takes
@@ -587,6 +629,11 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 	useEffect(() => {
 		warmTokens.refresh(); // pre-mint at mount (mitigation D) — silent if keyless
 	}, []);
+	// A Deepgram key saved or deleted in Settings: re-mint so the warm token
+	// and the phone's mic offer (phoneOffersDictation) follow the new truth.
+	useSettingsSaved((section) => {
+		if (section === "keys") warmTokens.refresh();
+	});
 	useEffect(() => {
 		window.addEventListener("lh:kbd-toggle-dictation", toggle);
 		return () => window.removeEventListener("lh:kbd-toggle-dictation", toggle);
@@ -631,6 +678,8 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 	const keyless = error === DICTATION_KEYLESS;
 	const [levels, setLevels] = useState<number[]>(() => new Array(METER_CELLS).fill(0));
 	const recording = phase === "recording" || phase === "stopping";
+	const isPhone = useIsPhone();
+	const keyState = useSyncExternalStore(subscribeDeepgramKey, () => deepgramKey, () => "unknown" as const);
 	/** Adaptive cell count (owner round 2): derived from the meter's
 	 *  measured width — narrow rows show fewer bars instead of
 	 *  overflowing under neighbors. */
@@ -672,6 +721,9 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 	}, [active]);
 
 	if (!active) {
+		// Phone: no mic at all when it cannot work (no Deepgram key, or no
+		// audio capture in an insecure context) — nothing to offer.
+		if (isPhone && !phoneOffersDictation(keyState, canCaptureAudio())) return null;
 		return (
 			<Hint
 				// Errored: the button span truncates the line — the tooltip is its
@@ -696,10 +748,13 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 					data-testid="dictation-toggle"
 				// Same blurring as the floating chrome (owner, fix wave round 3),
 			// but lower opacity — the mic stays quieter than the model pills.
-			className="flex h-7 w-full items-center justify-center gap-1.5 rounded-md border border-border/50 bg-card/50 text-xs text-muted-foreground/70 shadow-lg backdrop-blur transition-colors hover:border-border hover:text-muted-foreground"
+			// Phone: a real minimum size (the home row squeezed it to ~8px
+			// between the mode switch and the model pill); the "Dictate" label
+			// shows only when the button has room for it (container query).
+			className="flex h-7 w-full items-center justify-center gap-1.5 rounded-md border border-border/50 bg-card/50 text-xs text-muted-foreground/70 shadow-lg backdrop-blur transition-colors hover:border-border hover:text-muted-foreground phone:@container phone:min-w-10"
 			>
-					<MicIcon className="size-3.5" />
-					<span className="max-w-full truncate">{error ?? "Dictate"}</span>
+					<MicIcon className="size-3.5 phone:shrink-0" />
+					<span className={`max-w-full truncate${error ? "" : " phone:hidden phone:@min-[6rem]:inline"}`}>{error ?? "Dictate"}</span>
 				</button>
 			</Hint>
 		);

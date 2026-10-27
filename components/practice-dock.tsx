@@ -5,7 +5,7 @@ import { ChevronRightIcon } from "lucide-react";
 import { ToolContentResponse } from "@/components/ai-elements/message";
 import { Button } from "@/components/ui/button";
 import { joinDictation, useDictationTarget } from "@/components/dictation";
-import { useEnterSubmits } from "@/components/enter-submits";
+import { enterSends, useEnterSubmits } from "@/components/enter-submits";
 import { cn } from "@/lib/utils";
 
 /**
@@ -105,7 +105,7 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 			    cards' label row — owner round, 2026-10-05) + the statement,
 			    markdown + LaTeX rendered, capped by the measured column
 			    (--dock-max-h; the old fixed 40vh cut long problems short). */}
-			<div className="max-h-[var(--dock-max-h,40vh)] overflow-y-auto px-4 pt-3 pb-2">
+			<div data-dock-scroll="" className="max-h-[var(--dock-max-h,40vh)] overflow-y-auto px-4 pt-3 pb-2">
 				<div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Problem</div>
 				<div className="lh-prose text-[15px]">
 					<ToolContentResponse>{input.statement}</ToolContentResponse>
@@ -138,7 +138,8 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 						}
 						// Enter SENDS — the single lane (owner round 2, 2026-10-05);
 						// Shift+Enter is the newline, ⌘/Ctrl+Enter the chord too.
-						if (e.key === "Enter" && (!e.shiftKey || e.metaKey || e.ctrlKey)) {
+						// Phone: plain Enter is a newline (enterSends).
+						if (enterSends(e)) {
 							e.preventDefault();
 							submit();
 						}

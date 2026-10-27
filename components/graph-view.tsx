@@ -66,10 +66,12 @@
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { NotesImportErrors, useNotesImport } from "@/components/notes-import.tsx";
 import Link from "next/link";
-import { FileTextIcon, ListTreeIcon, Loader2Icon, SearchIcon, SettingsIcon, UploadIcon, WaypointsIcon } from "lucide-react";
+import { FileTextIcon, ListTreeIcon, Loader2Icon, MinusIcon, PlusIcon, ScanIcon, SearchIcon, SettingsIcon, SlidersHorizontalIcon, UploadIcon, WaypointsIcon } from "lucide-react";
 import { incrementalLayout, propositionSessionHref, type GraphCostSummary, type GraphNode, type GraphSnapshot } from "@/src/core";
 import { planCostLabel } from "@/components/usage-format";
-import { GraphCanvasRenderer, type GraphRenderSettings } from "./graph-canvas.ts";
+import { GraphCanvasRenderer, parseSavedCamera, type GraphRenderSettings, type SavedCamera } from "./graph-canvas.ts";
+import { isPhoneNow, useIsPhone } from "@/components/phone";
+import { useRenderSettings } from "@/components/graph-render-settings";
 import { usePopoverDismiss } from "@/components/popover-dismiss";
 import { useActivity } from "@/components/activity-dock";
 import { useServerEvent, useServerResync } from "@/components/server-events";
@@ -85,7 +87,6 @@ import {
 	DEPTH_BASE_RADIUS_RANGE,
 	DEPTH_SPACING_RANGE,
 	DEPTH_STRENGTH_RANGE,
-	DEFAULT_RENDER_SETTINGS,
 	EDGE_WIDTH_LADDER,
 	GRAVITY_RANGE,
 	LABEL_SIZE_LADDER,
@@ -93,18 +94,13 @@ import {
 	LINK_DISTANCE_RANGE,
 	LINK_STRENGTH_RANGE,
 	NODE_SIZE_LADDER,
-	REGION_BITMAP_OPTIONS,
-	REGION_BLUR_LADDER,
 	fromLadderPosition,
 	snapToLadder,
 	toLadderPosition,
-	REGION_DILATION_LADDER,
-	REGION_EDGE_ALPHA_LADDER,
 	VELOCITY_DECAY_RANGE,
 	fromOffSliderPosition,
 	fromSliderPosition,
 	labelZoomDisplay,
-	sanitizeRenderSettings,
 	toOffSliderPosition,
 	toSliderPosition,
 } from "@/src/core";
@@ -116,6 +112,20 @@ const NODE_COLOR_TOKEN = "--primary";
 /** Per-device graph camera persistence (zoom+pan view state). v1 in the
  *  key: the stored shape is the renderer's d3 transform {k, x, y}. */
 const CAMERA_STORAGE_KEY = "lh.graph.camera.v1";
+
+/** The notes picker's accept list. Desktop: extensions only (unchanged).
+ *  Phone (fork: mobile-layout): the Android picker filters by MIME type
+ *  and greys out extension-only matches, so the matching MIME types ride
+ *  along (text/x-markdown is what many Android file providers report). */
+export const NOTES_ACCEPT = ".md,.markdown,.txt";
+export const NOTES_ACCEPT_PHONE = `${NOTES_ACCEPT},text/markdown,text/x-markdown,text/plain`;
+
+/** Phone search (fork: mobile-layout): how long typing must pause before
+ *  the camera goes to the matches. */
+const SEARCH_FRAME_DELAY_MS = 450;
+
+/** Phone +/− controls: one tap zooms by this factor about the view center. */
+const ZOOM_BUTTON_FACTOR = 1.5;
 
 // ---- Render settings (the settings-panel controls) ------------------------
 //
@@ -345,11 +355,13 @@ export function GraphCostControl({ costs }: { costs: GraphCostSummary }) {
 	// wraps button + panel, so the toggle itself keeps working.
 	const rootRef = useRef<HTMLDivElement>(null);
 	usePopoverDismiss(rootRef, open, () => setOpen(false));
+	// Phone (fork: mobile-layout): touch wording.
+	const phone = useIsPhone();
 	return (
-		<div ref={rootRef} className="relative">
+		<div ref={rootRef} className="relative phone:pointer-events-auto">
 			<Hint
 				// Trimmed (owner, subtlety round 2026-09-25).
-				label="Graph costs — click for details"
+				label={phone ? "Graph costs — tap for details" : "Graph costs — click for details"}
 				side="bottom"
 			>
 				<button
@@ -459,7 +471,6 @@ function GraphSettingsControl({
 	// the root wraps button + panel, so the toggle itself keeps working.
 	const rootRef = useRef<HTMLDivElement>(null);
 	usePopoverDismiss(rootRef, open, () => setOpen(false));
-	const regionTuning = settings.regions;
 	const physicsTuning = settings.physics;
 	return (
 		<div ref={rootRef} className="relative">
@@ -476,7 +487,11 @@ function GraphSettingsControl({
 					open ? "text-foreground" : "text-muted-foreground hover:text-foreground"
 				}`}
 			>
-				<SettingsIcon className="size-4" />
+				{/* Phone: sliders, not a gear — the bottom tabs' Settings
+				    gear is on the same screen, and two gears read as one
+				    thing twice. CSS-swapped so the first paint is right. */}
+				<SettingsIcon className="size-4 phone:hidden" />
+				<SlidersHorizontalIcon className="hidden size-4 phone:block" />
 			</button>
 			</Hint>
 			{open && (
@@ -572,71 +587,10 @@ function GraphSettingsControl({
 										className="accent-primary"
 								/>
 							</label>
-							<SettingSlider
-								label="Dilation"
-								disabled={!regionTuning.enabled}
-								min={0}
-								max={100}
-								step={10}
-								value={toLadderPosition(regionTuning.dilation, REGION_DILATION_LADDER)}
-								display={sizeDisplay(regionTuning.dilation)}
-								onChange={(p) =>
-									changeSettings((cur) => ({
-										...cur,
-										regions: { ...cur.regions, dilation: fromLadderPosition(p, REGION_DILATION_LADDER) },
-									}))}
-							/>
-							<SettingSlider
-								label="Blur"
-								disabled={!regionTuning.enabled}
-								min={0}
-								max={100}
-								step={10}
-								value={toLadderPosition(regionTuning.blur, REGION_BLUR_LADDER)}
-								display={sizeDisplay(regionTuning.blur)}
-								onChange={(p) =>
-									changeSettings((cur) => ({
-										...cur,
-										regions: { ...cur.regions, blur: fromLadderPosition(p, REGION_BLUR_LADDER) },
-									}))
-								}
-							/>
-							<SettingSlider
-								label="Edge alpha"
-								disabled={!regionTuning.enabled}
-								min={0}
-								max={100}
-								step={10}
-								value={toLadderPosition(regionTuning.edgeAlpha, REGION_EDGE_ALPHA_LADDER)}
-								display={sizeDisplay(regionTuning.edgeAlpha)}
-								onChange={(p) =>
-									changeSettings((cur) => ({
-										...cur,
-										regions: { ...cur.regions, edgeAlpha: fromLadderPosition(p, REGION_EDGE_ALPHA_LADDER) },
-									}))}
-							/>
-							<label
-								className={`flex items-center justify-between gap-2 text-[11px] text-muted-foreground${!regionTuning.enabled ? " opacity-40" : ""}`}
-							>
-								<span>Bitmap resolution</span>
-								<select
-									disabled={!regionTuning.enabled}
-									className="rounded-md border bg-background px-1.5 py-0.5 text-xs tabular-nums text-foreground"
-									value={regionTuning.bitmap}
-									onChange={(e) =>
-										changeSettings((cur) => ({
-											...cur,
-											regions: { ...cur.regions, bitmap: Number(e.target.value) },
-										}))
-									}
-								>
-									{REGION_BITMAP_OPTIONS.map((o) => (
-										<option key={o} value={o}>
-											{o}
-										</option>
-									))}
-								</select>
-							</label>
+							{/* Dilation, Blur, Edge alpha and Bitmap resolution (the
+							    region bitmap's tuning) moved to Settings → Advanced
+							    (fork: mobile-layout, owner-approved): developer
+							    knobs, same storage, same live effect. */}
 							{/* Cluster labels moved here 2026-09-16 (user: cluster
 							    stuff lives in the regions section). Decoupled from
 							    the Background colors switch above — labels follow
@@ -829,6 +783,10 @@ function GraphSettingsControl({
 	);
 }
 
+/** The phone camera buttons' chrome (fit, +, −): the gear's look. */
+const CAMERA_BUTTON_CLASS =
+	"flex size-9 items-center justify-center rounded-xl border bg-card/85 text-muted-foreground shadow-lg backdrop-blur transition-colors hover:bg-accent hover:text-foreground phone:size-11";
+
 /** The top-chrome actions row's body (empty-graph chrome wave, owner
  *  2026-09-25): Import Notes renders ALWAYS (graph enabled) — it's the
  *  one action that works on an empty graph, the entry point itself;
@@ -849,6 +807,9 @@ export function GraphChromeRow({
 	settings,
 	changeSettings,
 	onOpenChains,
+	onRecenter,
+	onZoom,
+	onSearchSubmit,
 }: {
 	isEmpty: boolean;
 	query: string;
@@ -865,11 +826,21 @@ export function GraphChromeRow({
 	/** Opens the chain table overlay (the chains-overlay plan,
 	 *  2026-09-29). */
 	onOpenChains: () => void;
+	/** Phone (fork: mobile-layout): the fit/recenter control frames the
+	 *  whole graph. The button renders on phone only. */
+	onRecenter?: () => void;
+	/** Phone: the +/− controls under the fit button — zoom by the factor
+	 *  about the view center. They render with the fit button. */
+	onZoom?: (factor: number) => void;
+	/** Phone: Enter in the search field takes the camera to the matches
+	 *  (and closes the soft keyboard). */
+	onSearchSubmit?: () => void;
 }) {
+	const phone = useIsPhone();
 	return (
 		<>
 			{!isEmpty && (
-				<div className="graph-chrome-fade-in w-56 min-w-0 shrink rounded-xl border bg-card/85 px-1 py-[3px] shadow-lg backdrop-blur phone:w-auto phone:flex-1">
+				<div className="graph-chrome-fade-in w-56 min-w-0 shrink rounded-xl border bg-card/85 px-1 py-[3px] shadow-lg backdrop-blur phone:w-auto phone:flex-1 phone:basis-28">
 					<Hint
 						// ⌘F focuses node search (surface-scoped registry action).
 						label="Search nodes"
@@ -882,10 +853,19 @@ export function GraphChromeRow({
 							ref={searchInputRef}
 							value={query}
 							onChange={(e) => onQuery(e.target.value)}
+							onKeyDown={(e) => {
+								if (e.key !== "Enter" || !phone || !onSearchSubmit) return;
+								e.preventDefault();
+								onSearchSubmit();
+								e.currentTarget.blur(); // closes the soft keyboard
+							}}
 							placeholder="Search nodes…"
 							aria-label="Search nodes"
+							enterKeyHint={phone ? "search" : undefined}
 							spellCheck={false}
-							className="h-7 w-full rounded-lg border bg-background pl-8 text-xs outline-none placeholder:text-muted-foreground focus:border-ring phone:h-9 phone:text-base"
+							// Phone: min-h, not h — a 2× font scale grows the line
+							// box instead of clipping the text.
+							className="h-7 w-full rounded-lg border bg-background pl-8 text-xs outline-none placeholder:text-muted-foreground focus:border-ring phone:h-auto phone:min-h-9 phone:text-base"
 						/>
 					</div>
 					</Hint>
@@ -915,12 +895,12 @@ export function GraphChromeRow({
 			)}
 			{/* Import notes — its own container (36px, header band); ALWAYS
 			    rendered (the empty-graph ruling above — the entry point). */}
-			<div className="shrink-0 rounded-xl border bg-card/85 px-1 py-[3px] shadow-lg backdrop-blur">
+			<div className="shrink-0 rounded-xl border bg-card/85 px-1 py-[3px] shadow-lg backdrop-blur phone:min-w-0 phone:shrink">
 				<input
 					ref={fileInputRef}
 					type="file"
 					multiple
-					accept=".md,.markdown,.txt"
+					accept={phone ? NOTES_ACCEPT_PHONE : NOTES_ACCEPT}
 					className="hidden"
 					onChange={(e) => {
 						onImportFiles(e.target.files);
@@ -940,13 +920,53 @@ export function GraphChromeRow({
 						onClick={() => fileInputRef.current?.click()}
 						data-testid="import-notes"
 					aria-label={importing ? "Importing…" : "Import notes…"}
-					className="flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent disabled:opacity-50 phone:h-9"
+					className="flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent disabled:opacity-50 phone:h-9 phone:max-w-full"
 				>
-						<UploadIcon className="size-3 phone:size-4" />
-						<span className={isEmpty ? undefined : "phone:hidden"}>{importing ? "Importing…" : "Import notes…"}</span>
+						<UploadIcon className="size-3 shrink-0 phone:size-4" />
+						<span className={isEmpty ? "phone:truncate" : "phone:hidden"}>{importing ? "Importing…" : "Import notes…"}</span>
 					</button>
 				</Hint>
 			</div>
+			{!isEmpty && onRecenter && (
+				// Camera controls (fork: mobile-layout) — phone only. Fit /
+				// recenter: a drifted or lost view comes back in one tap. The
+				// +/− pair stacks under it (the row has no room for two more
+				// buttons at 360px) and zooms about the view center — pinch is
+				// not the only way in. Same chrome as the gear.
+				<div className="graph-chrome-fade-in hidden shrink-0 flex-col gap-2 phone:flex">
+					<button
+						type="button"
+						onClick={onRecenter}
+						data-testid="graph-recenter"
+						aria-label="Fit graph to screen"
+						className={CAMERA_BUTTON_CLASS}
+					>
+						<ScanIcon className="size-4" />
+					</button>
+					{onZoom && (
+						<>
+							<button
+								type="button"
+								onClick={() => onZoom(ZOOM_BUTTON_FACTOR)}
+								data-testid="graph-zoom-in"
+								aria-label="Zoom in"
+								className={CAMERA_BUTTON_CLASS}
+							>
+								<PlusIcon className="size-4" />
+							</button>
+							<button
+								type="button"
+								onClick={() => onZoom(1 / ZOOM_BUTTON_FACTOR)}
+								data-testid="graph-zoom-out"
+								aria-label="Zoom out"
+								className={CAMERA_BUTTON_CLASS}
+							>
+								<MinusIcon className="size-4" />
+							</button>
+						</>
+					)}
+				</div>
+			)}
 			{!isEmpty && (
 				// Rendering settings — own component; the gear toggles it. The
 				// gear sits at the far right (owner, round 3) so its panel drops
@@ -1000,62 +1020,16 @@ export function GraphView({
 	// Render settings: SERVER-persisted (data/render-settings.json via
 	// /api/graph/render-settings) — sizes AND the region/physics sections
 	// (user-facing since 2026-09-13; the dev-session era is over). Loaded
-	// once after mount; every user change saves back, debounced. Defaults
-	// render until the load resolves — a fraction of a second at worst.
-	const [settings, setSettings] = useState<GraphRenderSettings>(DEFAULT_RENDER_SETTINGS);
+	// on mount, every user change saves back, debounced; defaults render
+	// until the load resolves. Fork: mobile-layout — the copy lives in a
+	// shared store (graph-render-settings.ts) because the region tuning
+	// knobs moved to Settings → Advanced: both surfaces edit one copy, and
+	// either's change reaches the renderer live.
+	const [settings, changeSettings] = useRenderSettings();
 	// The two nested sections, unpacked for the renderer feed effects
 	// below (same names the old session state had).
 	const regionTuning = settings.regions;
 	const physicsTuning = settings.physics;
-	const settingsRef = useRef(settings);
-	settingsRef.current = settings;
-	// True once the user has moved a control this mount: the server copy
-	// must never clobber a (possibly newer) local change.
-	const userTouched = useRef(false);
-	// True once the initial GET settled — saves are held back until then,
-	// so merely mounting never PUTs defaults over the server copy.
-	const serverLoaded = useRef(false);
-	const savePending = useRef(false);
-	const changeSettings = (update: (cur: RenderSettings) => RenderSettings) => {
-		userTouched.current = true;
-		setSettings(update);
-	};
-	const saveToServer = (s: RenderSettings) => {
-		fetch("/api/graph/render-settings", {
-			method: "PUT",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify(s),
-		}).catch((err) => console.error("[graph] settings save failed:", err));
-	};
-	useEffect(() => {
-		fetch("/api/graph/render-settings")
-			.then((res) => (res.ok ? (res.json() as Promise<unknown>) : null))
-			.then((raw) => {
-				// Apply only if the user hasn't already moved a slider —
-				// if they outran the network, their change wins.
-				if (raw !== null && !userTouched.current) setSettings(sanitizeRenderSettings(raw));
-			})
-			.catch(() => {
-				// server unreachable → in-memory defaults keep working
-			})
-			.finally(() => {
-				serverLoaded.current = true;
-				// A change made during the fetch was held back — send now.
-				if (savePending.current) {
-					savePending.current = false;
-					saveToServer(settingsRef.current);
-				}
-			});
-	}, []);
-	useEffect(() => {
-		if (!userTouched.current) return; // mount-run / server-apply: no save
-		if (!serverLoaded.current) {
-			savePending.current = true; // hold until the GET settles
-			return;
-		}
-		const id = setTimeout(() => saveToServer(settings), 400);
-		return () => clearTimeout(id);
-	}, [settings]);
 
 	// The renderer instance lives across snapshot refetches and settings
 	// changes (its camera is never reset by either); `posRef` carries the
@@ -1086,6 +1060,9 @@ export function GraphView({
 	useEffect(() => {
 		if (chainSelectOpen) setChainsOpen(true);
 	}, [chainSelectOpen]);
+	// The first fetch failed (fork: mobile-layout): the phone's loading
+	// state gives way to the empty state instead of spinning forever.
+	const [loadFailed, setLoadFailed] = useState(false);
 	useEffect(() => {
 		let cancelled = false;
 		fetch("/api/graph")
@@ -1093,7 +1070,10 @@ export function GraphView({
 			.then((data) => {
 				if (!cancelled) setSnapshot(data);
 			})
-			.catch((err) => console.error("[graph] fetch failed:", err));
+			.catch((err) => {
+				console.error("[graph] fetch failed:", err);
+				if (!cancelled) setLoadFailed(true);
+			});
 		return () => {
 			cancelled = true;
 		};
@@ -1306,6 +1286,9 @@ export function GraphView({
 	// away (the empty-graph placeholder replaces it). The callbacks are
 	// created once and read through refs, so they never go stale.
 	const isEmpty = snapshot === null || snapshot.nodes.length === 0;
+	// Before the first snapshot lands (fork: mobile-layout): the phone
+	// shows a quiet spinner, not the "Start a session…" empty state.
+	const loading = snapshot === null && !loadFailed;
 	useEffect(() => {
 		if (isEmpty) return;
 		const canvas = canvasRef.current;
@@ -1314,26 +1297,26 @@ export function GraphView({
 		// user left it — zoom AND pan, in localStorage (per-device view
 		// state, deliberately NOT the server settings ledger). Absent or
 		// corrupt → undefined → the renderer fits on first open, ever.
-		let initialCamera: { k: number; x: number; y: number } | null = null;
+		// Fork: mobile-layout — the entry also records the viewport size
+		// it was taken in (w/h); the phone restores it viewport-relative
+		// (rotation / soft keyboard), desktop ignores the extra fields.
+		let initialCamera: SavedCamera | null = null;
 		try {
 			const stored = localStorage.getItem(CAMERA_STORAGE_KEY);
-			if (stored) {
-				const parsed = JSON.parse(stored) as { k?: unknown; x?: unknown; y?: unknown };
-				if (
-					typeof parsed.k === "number" && Number.isFinite(parsed.k) && parsed.k > 0 &&
-					typeof parsed.x === "number" && Number.isFinite(parsed.x) &&
-					typeof parsed.y === "number" && Number.isFinite(parsed.y)
-				)
-					initialCamera = { k: parsed.k, x: parsed.x, y: parsed.y };
-			}
+			if (stored) initialCamera = parseSavedCamera(JSON.parse(stored));
 		} catch {
 			// Corrupt entry → treat as absent; the renderer fits.
 		}
 		// Debounced camera writes: a pan emits hundreds of transforms per
 		// second; one trailing write per quiet spell is plenty.
 		let cameraTimer: ReturnType<typeof setTimeout> | null = null;
-		let lastCamera: { k: number; x: number; y: number } | null = null;
-		const persistCamera = (t: { k: number; x: number; y: number }) => {
+		let lastCamera: SavedCamera | null = null;
+		const persistCamera = (transform: { k: number; x: number; y: number }, view: { w: number; h: number }) => {
+			const t: SavedCamera = { k: transform.k, x: transform.x, y: transform.y };
+			if (view.w >= 10 && view.h >= 10) {
+				t.w = view.w;
+				t.h = view.h;
+			}
 			lastCamera = t;
 			if (cameraTimer) clearTimeout(cameraTimer);
 			cameraTimer = setTimeout(() => {
@@ -1376,10 +1359,10 @@ export function GraphView({
 				// it, and (debounced) remember where the camera stands. The
 				// context menu closes with it: a menu floating over a moved
 				// graph is anchored to nothing.
-				onCameraMove: (t) => {
+				onCameraMove: (t, view) => {
 					setSelected(null);
 					setCtxNode(null);
-					persistCamera(t);
+					persistCamera(t, view);
 				},
 				// Live physics settled: persist the new rest state. Fire-and-
 				// forget — the next snapshot fetch carries the ledger anyway.
@@ -1392,6 +1375,7 @@ export function GraphView({
 				},
 			},
 			initialCamera,
+			{ isPhone: isPhoneNow },
 		);
 		rendererRef.current = renderer;
 		return () => {
@@ -1455,6 +1439,24 @@ export function GraphView({
 		setSelected((sel) => (sel && visibleIds.has(sel.node.id) ? sel : null));
 	}, [visibleIds, query]);
 
+	// Phone search (fork: mobile-layout): filtering alone left the matches
+	// wherever they were — often off-screen. Once typing pauses, the
+	// camera goes to them (frameNodes: centered, zoomed to read labels,
+	// never further in than the user already was). Desktop unchanged.
+	// Keyed on the QUERY only: a snapshot refetch mid-search must not
+	// yank the camera, so the matches are read through a ref.
+	const visibleIdsRef = useRef(visibleIds);
+	visibleIdsRef.current = visibleIds;
+	const frameMatches = useCallback(() => {
+		const ids = visibleIdsRef.current;
+		if (ids.size > 0) rendererRef.current?.frameNodes(ids);
+	}, []);
+	useEffect(() => {
+		if (!isPhoneNow() || !query.trim()) return;
+		const id = setTimeout(frameMatches, SEARCH_FRAME_DELAY_MS);
+		return () => clearTimeout(id);
+	}, [frameMatches, query]);
+
 	// Feed #4 — region tuning. `isEmpty` in the deps (same as Feed #2):
 	// the settings fetch resolves BEFORE the snapshot creates the renderer,
 	// so the load-time run hits a null renderer and would never re-fire —
@@ -1496,9 +1498,17 @@ export function GraphView({
 
 	return (
 		<div className="relative h-full w-full">
+			{isEmpty && loading && (
+				// Phone (fork: mobile-layout): a quiet spinner until the first
+				// snapshot lands — never the empty state for a graph that may
+				// well have nodes. Desktop keeps its unchanged empty state.
+				<div role="status" aria-label="Loading graph" className="hidden h-full w-full items-center justify-center phone:flex">
+					<Loader2Icon className="size-5 animate-spin text-muted-foreground/60" />
+				</div>
+			)}
 			{isEmpty ? (
 				// The empty graph keeps the first action clear without zero-valued statistics.
-				<div className="flex h-full w-full items-center justify-center px-4">
+				<div className={`flex h-full w-full items-center justify-center px-4 ${loading ? "phone:hidden" : ""}`}>
 					<div className="flex flex-col items-center gap-3 text-center text-muted-foreground">
 						<WaypointsIcon className="size-10 opacity-40" strokeWidth={1.25} />
 						<div className="text-lg font-medium text-foreground">Knowledge graph</div>
@@ -1594,13 +1604,18 @@ export function GraphView({
 			    against the full-bleed parent) — the row NEVER wraps (owner
 			    rejected the two-row fold); in narrow windows the search is
 			    the flexible element and shrinks instead. */}
-			<div className="lh-no-drag lh-wco-floating absolute right-2 top-2 z-10 flex max-w-[calc(100%-5.5rem)] flex-col items-end gap-2 phone:left-2 phone:max-w-none">
+			<div className="lh-no-drag lh-wco-floating absolute right-2 top-2 z-10 flex max-w-[calc(100%-5.5rem)] flex-col items-end gap-2 phone:pointer-events-none phone:left-2 phone:max-w-none">
 			{/* z-20 (2026-09-20): the row paints above the cost number below
 			    it — without this, the later-in-DOM cost control layered over
 			    the settings/coverage dropdowns (owner report), still hoverable
 			    and clickable on top of them. The row is a stacking context, so
 			    its open dropdowns cover the number; clicks land on the panel. */}
-			<div className="relative z-20 flex min-w-0 items-start gap-2 phone:w-full phone:justify-end">
+			{/* Phone (fork: mobile-layout): flex-wrap is a SAFETY fold only —
+			    at normal font scales the row fits one line (the search has a
+			    7rem basis and shrinks); at a 2× font scale the buttons drop
+			    under it instead of pushing the row off-screen. Hidden on
+			    phone until the first snapshot lands (the loading state). */}
+			<div className={`relative z-20 flex min-w-0 items-start gap-2 phone:w-full phone:flex-wrap phone:justify-end phone:*:pointer-events-auto ${loading ? "phone:hidden" : ""}`}>
 				{/* The actions row (empty-graph chrome wave, owner 2026-09-25):
 				    Import Notes always — the empty graph's entry point; search +
 				    settings only when nodes exist, fading in on their mount. */}
@@ -1616,6 +1631,11 @@ export function GraphView({
 					settings={settings}
 					changeSettings={changeSettings}
 					onOpenChains={() => setChainsOpen(true)}
+					onRecenter={() => rendererRef.current?.recenter()}
+					onZoom={(factor) => rendererRef.current?.zoomBy(factor)}
+					onSearchSubmit={() => {
+						if (query.trim()) frameMatches();
+					}}
 				/>
 			</div>
 
@@ -1630,12 +1650,12 @@ export function GraphView({
 			{pipelineRuns.map((run) => (
 				<div
 					key={run.id}
-					className="flex items-center gap-2 rounded-full border bg-card/85 px-3 py-1.5 text-xs text-muted-foreground shadow-lg backdrop-blur"
+					className="flex items-center gap-2 rounded-full border bg-card/85 px-3 py-1.5 text-xs text-muted-foreground shadow-lg backdrop-blur phone:max-w-full phone:min-w-0"
 				>
 					<Loader2Icon className="size-3.5 shrink-0 animate-spin" />
-					<span className="capitalize">{run.phase}</span>
-					<span className="max-w-48 truncate text-foreground">{run.title}</span>
-					<span className="tabular-nums">{Math.max(0, Math.round((Date.now() - run.startedAt) / 1000))}s</span>
+					<span className="capitalize phone:shrink-0">{run.phase}</span>
+					<span className="max-w-48 truncate text-foreground phone:min-w-0">{run.title}</span>
+					<span className="tabular-nums phone:shrink-0">{Math.max(0, Math.round((Date.now() - run.startedAt) / 1000))}s</span>
 				</div>
 			))}
 			</div>

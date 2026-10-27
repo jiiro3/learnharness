@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDownIcon, ChevronRightIcon, PlayIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { finishDictation, isDictationActive, joinDictation, useDictationTarget } from "@/components/dictation";
-import { useEnterSubmits } from "@/components/enter-submits";
+import { enterSends, useEnterSubmits } from "@/components/enter-submits";
 import { ToolContentResponse } from "@/components/ai-elements/message";
 import { cn } from "@/lib/utils";
 import {
@@ -12,7 +12,8 @@ import {
 	repairMathForDisplay,
 	normalizeQuizType,
 	CONFIDENCE_STOPS,
-	DEFAULT_CONFIDENCE_INDEX,
+	nearestConfidenceIndex,
+	stepConfidenceIndex,
 	emptyDockSelection,
 	normalizeOptions,
 	resolveCorrect,
@@ -333,11 +334,13 @@ function QuestionDockForm({
 	 * in time — submit reads these, kept current at every write site. */
 	const thinkingTextRef = useRef(initialDraft?.thinking ?? "");
 	const answerTextRef = useRef(initialDraft?.text ?? "");
-	// Confidence (owner, 2026-10-01): an index into CONFIDENCE_STOPS,
-	// resting at 50 — a real coin flip by definition, untouched or
-	// deliberate (the same number, the same meaning). The dock unmounts
-	// between questions, so each question starts fresh at 50.
-	const [confIdx, setConfIdx] = useState<number>(initialDraft?.confidenceIndex ?? DEFAULT_CONFIDENCE_INDEX);
+	// Confidence (owner, 2026-10-01): an index into CONFIDENCE_STOPS, or
+	// null = NOT SET (2026-10-26): the slider starts unset and an
+	// untouched slider sends no confidence, so a deliberate 50 is never
+	// confused with "didn't move it". The dock unmounts between
+	// questions, so each question starts fresh and unset.
+	const [confIdx, setConfIdx] = useState<number | null>(initialDraft?.confidenceIndex ?? null);
+	const confValue = confIdx === null ? undefined : CONFIDENCE_STOPS[confIdx];
 	const selectMode: SelectMode = qd.mode === "multi-select" ? "multi-select" : "single-select";
 
 	// The PRIMARY dictation input (owner, STT round 1): while a question
@@ -397,9 +400,10 @@ function QuestionDockForm({
 			other: sel.otherSelected ? other : undefined,
 			text: qd.mode === "text" ? answerTextRef.current : undefined,
 			thinking: qd.mode !== "text" ? thinkingTextRef.current.trim() || undefined : undefined,
-			// Always sent on quiz answers (owner: 50 must mean 50, never
-			// "untouched"); buildAnswer drops it on "I don't know".
-			confidence: kind === "quiz" ? CONFIDENCE_STOPS[confIdx] : undefined,
+			// Sent only once the learner set it — untouched = absent ("not
+			// set"), so 50 always means a deliberate 50. buildAnswer drops it
+			// on "I don't know".
+			confidence: kind === "quiz" ? confValue : undefined,
 		};
 		// Snapshot before optimistic submission unmounts the form. Ref values
 		// include the dictation finals that just landed, unlike stale closures.
@@ -531,12 +535,8 @@ function QuestionDockForm({
 				// (the slider grays out and nothing is sent).
 				if (kind !== "quiz" || sel.dontKnow) return;
 				e.preventDefault();
-				setConfIdx((i) =>
-					Math.min(
-						CONFIDENCE_STOPS.length - 1,
-						Math.max(0, i + (e.key === "ArrowRight" ? 1 : -1)),
-					),
-				);
+				// From unset, the first press lands on the middle stop (50).
+				setConfIdx((i) => stepConfidenceIndex(i, e.key === "ArrowRight" ? 1 : -1));
 			} else if (e.key === " ") {
 				if (kbdIdx === null) return; // plain Space keeps scrolling the page
 				e.preventDefault();
@@ -564,7 +564,7 @@ function QuestionDockForm({
 			{/* Question area — scrolls internally if very tall; the bottom row stays put.
 			    Capped by the measured column (--dock-max-h; the old fixed 55dvh cut
 			    long questions short — owner round, 2026-10-05). */}
-			<div data-session-find-root="" className="max-h-[var(--dock-max-h,55dvh)] overflow-y-auto px-4 pt-3">
+			<div data-dock-scroll="" data-session-find-root="" className="max-h-[var(--dock-max-h,55dvh)] overflow-y-auto px-4 pt-3">
 				<div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
 					{toolName === "probe"
 						? "Probe"
@@ -752,9 +752,11 @@ function QuestionDockForm({
 				them). Keyboard: GLOBAL ←/→ (the ↑/↓ pattern; the ring is gone
 				app-wide). Clicking and dragging are native. "I don't know"
 				GRAYS it out — the layout holds, no value is sent, the IDK
-				signal stands alone. */}
+				signal stands alone. UNSET (2026-10-26): the slider starts
+				with no disc and a bare rail, reading "not set"; the first
+				tap, drag or ←/→ sets it. Untouched = no confidence sent. */}
 			{kind === "quiz" && (
-				<div className="border-t border-border/60 px-4 py-2.5">
+				<div className="border-t border-border/60 px-4 py-2.5 phone:py-0.5">
 					<div className="flex items-center gap-3">
 						<span
 							className={cn(
@@ -765,7 +767,7 @@ function QuestionDockForm({
 							Confidence
 						</span>
 						<div
-							className={cn("relative h-4 min-w-0 flex-1", sel.dontKnow && "opacity-40")}
+							className={cn("relative h-4 min-w-0 flex-1 phone:h-11", sel.dontKnow && "opacity-40")}
 							data-testid="confidence-track"
 						>
 							{/* The RAIL is painted here, not on the input: this overlay spans
@@ -782,17 +784,20 @@ function QuestionDockForm({
 								aria-hidden
 								data-testid="confidence-rail"
 								className="pointer-events-none absolute top-1/2 left-2 right-2 h-1.5 -translate-y-1/2 rounded-full border border-border"
-								style={confidenceRailStyle(CONFIDENCE_STOPS[confIdx]!)}
+								style={confidenceRailStyle(confValue)}
 							/>
 							<input
 								type="range"
 								min={0}
 								max={100}
 								step={1}
-								value={CONFIDENCE_STOPS[confIdx]}
+								// Unset still needs SOME native value: the middle, with the
+								// disc hidden — the thumb position means nothing until set.
+								value={confValue ?? 50}
 								disabled={sel.dontKnow}
 								aria-label="Confidence — the probability your selected answer is correct"
-								aria-valuetext={`${CONFIDENCE_STOPS[confIdx]} percent`}
+								aria-valuetext={confValue === undefined ? "not set" : `${confValue} percent`}
+								data-unset={confValue === undefined ? "" : undefined}
 								title="The probability your selected answer is correct — 50% is a coin flip. Adjust with ←/→."
 								data-testid="confidence-slider"
 								onChange={(e) => {
@@ -801,31 +806,43 @@ function QuestionDockForm({
 									// halfway). Keyboard needs no handler here: the dock machine treats
 									// a focused range as non-typing (see the guard above) and its ←/→
 									// branch preventDefaults, which also cancels the native 1% step.
-									const v = Number(e.target.value);
-									let best = 0;
-									for (let i = 1; i < CONFIDENCE_STOPS.length; i++) {
-										if (Math.abs(CONFIDENCE_STOPS[i]! - v) < Math.abs(CONFIDENCE_STOPS[best]! - v)) best = i;
-									}
-									setConfIdx(best);
+									setConfIdx(nearestConfidenceIndex(Number(e.target.value)));
 								}}
-								style={{ color: CONFIDENCE_COLORS[confIdx] }}
+								onPointerUp={(e) => {
+									// A tap exactly on the unset rest point (50) changes no
+									// native value, so onChange never fires — the release
+									// sets it instead.
+									if (confIdx === null && !sel.dontKnow) {
+										setConfIdx(nearestConfidenceIndex(Number(e.currentTarget.value)));
+									}
+								}}
+								style={confIdx === null ? undefined : { color: CONFIDENCE_COLORS[confIdx] }}
 								className={cn(
 									"absolute inset-0 h-4 w-full cursor-pointer appearance-none bg-transparent outline-none",
 									"[&::-webkit-slider-runnable-track]:h-4 [&::-webkit-slider-runnable-track]:bg-transparent",
 									"[&::-webkit-slider-thumb]:size-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-current",
+									// Phone (fork: mobile-layout): a 44px-tall touch band. The
+									// track fills it and the 16px disc is centered in it (WebKit
+									// top-aligns the thumb in a taller track: (44 − 16) / 2).
+									"phone:h-11 phone:[&::-webkit-slider-runnable-track]:h-11 phone:[&::-webkit-slider-thumb]:mt-3.5 phone:[&::-moz-range-track]:h-11",
 									"[&::-moz-range-track]:h-4 [&::-moz-range-track]:bg-transparent",
 									"[&::-moz-range-thumb]:size-4 [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-current",
+									// Unset: no disc at all — the bare rail + "not set" say it.
+									confIdx === null && "[&::-webkit-slider-thumb]:opacity-0 [&::-moz-range-thumb]:opacity-0",
 								)}
 							/>
 						</div>
 						<span
 							data-testid="confidence-value"
 							className={cn(
-								"w-9 shrink-0 text-right font-mono text-sm tabular-nums",
+								// Wide enough for "not set" so the track never jumps
+								// when the first touch turns it into a percent.
+								"w-14 shrink-0 text-right font-mono text-sm tabular-nums",
 								sel.dontKnow && "text-muted-foreground/50",
+								!sel.dontKnow && confValue === undefined && "text-xs text-muted-foreground",
 							)}
 						>
-							{sel.dontKnow ? "—" : `${CONFIDENCE_STOPS[confIdx]}%`}
+							{sel.dontKnow ? "—" : confValue === undefined ? "not set" : `${confValue}%`}
 						</span>
 					</div>
 				</div>
@@ -869,7 +886,8 @@ function QuestionDockForm({
 								}
 								// Chat convention: Enter submits, Shift+Enter is a newline;
 								// ⌘/Ctrl+Enter also submits (universal across the app).
-								if (e.key === "Enter" && (e.metaKey || e.ctrlKey || !e.shiftKey)) {
+								// Phone: plain Enter is a newline (enterSends).
+								if (enterSends(e)) {
 									e.preventDefault();
 									submit();
 								}
@@ -899,7 +917,8 @@ function QuestionDockForm({
 								// THE STANDARD CHORD (owner round 5, 2026-10-05): Enter
 								// submits, Shift+Enter is a newline, ⌘/Ctrl+Enter works
 								// too — identical to the practice dock and the composer.
-								if (e.key === "Enter" && (!e.shiftKey || e.metaKey || e.ctrlKey)) {
+								// Phone: plain Enter is a newline (enterSends).
+								if (enterSends(e)) {
 									e.preventDefault();
 									submit();
 								}

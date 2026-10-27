@@ -147,6 +147,19 @@ export function dismissAppends(record: { messages: LhMessage[] }, input: Dismiss
 	return [newAnswerResult(input.toolCallId, pending.tool, input.answer)];
 }
 
+/** Confidence is optional (2026-10-26): absent = the learner never
+ *  touched the slider ("not set"). A non-number on the wire (null, a
+ *  string) is the same "not set" — the key is dropped so the record and
+ *  the model's view never carry a fake value. Numeric confidences (every
+ *  older record) pass through untouched. */
+function withoutUnsetConfidence(answer: QuestionAnswerData): QuestionAnswerData {
+	if (!("confidence" in answer)) return answer;
+	const c: unknown = answer.confidence;
+	if (typeof c === "number" && Number.isFinite(c)) return answer;
+	const { confidence: _unset, ...rest } = answer;
+	return rest;
+}
+
 /** A malformed input event (the honest 400 — the orphan-trap discipline). */
 export class ChatInputError extends Error {}
 
@@ -167,7 +180,7 @@ export function parseChatInput(input: unknown): ChatInput {
 			if (typeof i.answer !== "object" || i.answer === null) {
 				throw new ChatInputError("answer input requires the graded answer object");
 			}
-			return { type: "answer", toolCallId: i.toolCallId, answer: i.answer as QuestionAnswerData };
+			return { type: "answer", toolCallId: i.toolCallId, answer: withoutUnsetConfidence(i.answer as QuestionAnswerData) };
 		case "continue":
 			return { type: "continue" };
 		case "thinking":

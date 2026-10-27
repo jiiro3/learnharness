@@ -25,7 +25,9 @@ export function formatTokens(n: number): string {
  *  No colon = no provider qualification (a bare catalog id). */
 export function splitQualified(id: string): { provider: string | null; id: string } {
 	const colon = id.indexOf(":");
-	if (colon === -1) return { provider: null, id };
+	// A provider never contains "/": "anthropic/claude-sonnet-4.5:thinking"
+	// is a bare OpenRouter id with a variant suffix, not "provider:id".
+	if (colon === -1 || id.slice(0, colon).includes("/")) return { provider: null, id };
 	return { provider: id.slice(0, colon), id: id.slice(colon + 1) };
 }
 
@@ -50,4 +52,17 @@ export function prettyModel(id: string, qualified = false): string {
 	// model names render exactly as their providers write them.
 	const pretty = trimmed.join("-");
 	return qualified && provider ? `${pretty} · ${provider}` : pretty;
+}
+
+/**
+ * The phone pill's label (fork: mobile-layout): prettyModel without a
+ * "~" alias marker or a trailing "-latest" — "~anthropic/claude-opus-latest"
+ * reads "claude-opus" — so the model pill fits one line beside the mode
+ * switch and the thinking pill. The picker list and the pill's aria-label
+ * keep the full id.
+ */
+export function compactModelLabel(id: string): string {
+	const pretty = prettyModel(id).replace(/^~/, "");
+	const short = pretty.replace(/-latest$/, "");
+	return short || pretty;
 }

@@ -164,15 +164,29 @@ export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionA
 			{/* The confidence record (owner round 6): the slider's rail, disc
 			    removed — the missing handle itself says "this is a record, not a
 			    control". Same paint, same ticks, same ramp, same % read-out as the
-			    live dock. Quiz answers only, and only when a confidence exists:
-			    "I don't know" sent none (its slider was grayed out), explain and
-			    ask never had one, and records from before the feature carry no
-			    field — nothing to show, nothing rendered. */}
-			{isQuiz && answer.confidence != null && (
-				<div className="mt-3 flex items-center gap-3" data-testid="answered-confidence">
-					<ConfidenceRail value={answer.confidence} className="min-w-0 flex-1" />
-					<span className="w-9 shrink-0 text-right font-mono text-sm tabular-nums text-muted-foreground">
-						{answer.confidence}%
+			    live dock. Quiz answers only: "I don't know" sent none (its
+			    slider was grayed out) and explain/ask never had one — nothing
+			    rendered. A quiz answer whose slider was never touched
+			    (2026-10-26) shows the bare rail + "not set", the dock's own
+			    unset look. (Records from before the feature also carry no
+			    field; "not set" is true for them too.) */}
+			{isQuiz && !answer.dontKnow && (
+				<div
+					className="mt-3 flex items-center gap-3"
+					data-testid="answered-confidence"
+					{...(typeof answer.confidence === "number" ? {} : { "data-unset": "" })}
+				>
+					<ConfidenceRail
+						value={typeof answer.confidence === "number" ? answer.confidence : undefined}
+						className="min-w-0 flex-1"
+					/>
+					<span
+						className={cn(
+							"w-14 shrink-0 text-right font-mono tabular-nums text-muted-foreground",
+							typeof answer.confidence === "number" ? "text-sm" : "text-xs",
+						)}
+					>
+						{typeof answer.confidence === "number" ? `${answer.confidence}%` : "not set"}
 					</span>
 				</div>
 			)}
@@ -205,7 +219,7 @@ export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionA
 					<button
 						type="button"
 						onClick={() => setWhyOpen((v) => !v)}
-						className="text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+						className="text-xs font-medium text-muted-foreground transition-colors hover:text-foreground phone:-mx-3 phone:-my-3.5 phone:px-3 phone:py-3.5"
 					>
 						{whyOpen ? "Hide why" : "Why"}
 					</button>

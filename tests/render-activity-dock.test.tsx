@@ -196,6 +196,13 @@ describe("activity section render", () => {
 		assert.doesNotMatch(html, /activity-total-cost/, "the cost span is population, not decoration");
 	});
 
+	it("phone (fork: mobile-layout): empty is phone-hidden; a running process shows", () => {
+		const idle = renderToStaticMarkup(<ActivitySection feed={{ jobs: [], extractions: [] }} />);
+		assert.match(idle, /data-testid="activity-section" class="[^"]*phone:hidden/);
+		const busy = renderToStaticMarkup(<ActivitySection feed={{ jobs: [job()], extractions: [] }} />);
+		assert.doesNotMatch(busy, /data-testid="activity-section" class="[^"]*phone:hidden/);
+	});
+
 	it("renders one blob per running process with cost, elapsed, and the abort affordance", () => {
 		const html = renderToStaticMarkup(
 			<ActivitySection

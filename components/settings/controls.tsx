@@ -61,6 +61,8 @@ export function SettingsRow({
 	children,
 	testid,
 	dimmed,
+	stackOnPhone,
+	hideOnPhone,
 }: {
 	label: string;
 	hint?: ReactNode;
@@ -69,9 +71,24 @@ export function SettingsRow({
 	/** Dependency graying, graph-view style: the whole row dims when the
 	 *  control is inert (parent off, no file yet, …). */
 	dimmed?: boolean;
+	/** Phone only: put the controls UNDER the label + hint, so a long hint
+	 *  gets the full width instead of wrapping one word per line beside
+	 *  wide controls. Desktop keeps the side-by-side row. */
+	stackOnPhone?: boolean;
+	/** Phone only: the row is not rendered (a placeholder row with nothing
+	 *  to offer there, e.g. "Mode — Coming soon"). Desktop keeps it. */
+	hideOnPhone?: boolean;
 }) {
 	return (
-		<div data-testid={testid} className={cn("flex items-center justify-between gap-4 py-1", dimmed && "opacity-40")}>
+		<div
+			data-testid={testid}
+			className={cn(
+				"flex items-center justify-between gap-4 py-1",
+				stackOnPhone && "phone:flex-col phone:items-start phone:gap-1.5",
+				dimmed && "opacity-40",
+				hideOnPhone && "phone:hidden",
+			)}
+		>
 			<span className="min-w-0">
 				<span className="block font-prose text-(length:--lh-prose-size)">{label}</span>
 				{hint && <span className="block text-xs text-muted-foreground/70">{hint}</span>}
@@ -113,10 +130,14 @@ export function Toggle({
 			data-testid={`toggle-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
 			onClick={() => onChange(!checked)}
 			className={cn(
-				"relative h-4.5 w-8 shrink-0 rounded-full border border-border transition-colors",
+				"relative h-4.5 w-8 shrink-0 rounded-full border transition-colors",
 				// Owner (2026-09-20): on is a gray track with a WHITE disc (a full-white
-				// track was too loud); off stays the muted track.
-				checked ? "bg-muted-foreground" : "bg-muted",
+				// track was too loud). Legibility fix (2026-10-26): on is a SOLID
+				// filled pill (border matches the fill) and off is a HOLLOW outline
+				// with a dim disc, so the two states never read alike — the old off
+				// track (#1c1c1c) was nearly the page color and the off/on pair read
+				// as "disabled" at a glance.
+				checked ? "border-muted-foreground bg-muted-foreground" : "border-muted-foreground/60 bg-transparent",
 				disabled && "cursor-not-allowed",
 			)}
 		>
@@ -137,7 +158,7 @@ export function Toggle({
 						"absolute left-0 top-0.5 size-3 rounded-full transition-transform",
 						// 2px inset from each inner edge, both states (owner round: the on
 						// disc used to touch the pill's right edge).
-						checked ? "translate-x-4 bg-foreground" : "translate-x-0.5 bg-muted-foreground",
+						checked ? "translate-x-4 bg-foreground" : "translate-x-0.5 bg-muted-foreground/70",
 					)}
 				/>
 			)}

@@ -13,6 +13,7 @@ import type { LhMessage } from "../src/core/native-messages.ts";
 import { messageMarkdown, sessionMarkdown } from "../src/core/session-markdown.ts";
 import { messageViewLines } from "../src/core/coverage.ts";
 import { coverageSlots } from "../src/core/coverage.ts";
+import { buildAnswer, normalizeOptions, type QuestionData } from "../src/core/question-core.ts";
 
 function user(id: string, text: string): LhMessage {
 	return { id, role: "user", content: text, timestamp: Date.now() } as never;
@@ -88,7 +89,16 @@ describe("messageMarkdown", () => {
 		assert.match(md, /^### Quiz · r1$/m);
 		assert.match(md, /\*\*Q:\*\* What is a derivative\?/);
 		assert.match(md, /The learner answered incorrectly\./);
-		assert.match(md, /\*\(his thinking: mixed up signs\)\*/);
+		assert.match(md, /\*\(the learner's thinking: mixed up signs\)\*/, "the pre-rename `note` key still renders");
+	});
+
+	it("check blocks read `thinking` (the current key) and prefer it over a legacy `note`", () => {
+		const md = messageMarkdown(
+			result("r1", "q1", "quiz", { questionText: "Q?", correct: true, dontKnow: false, thinking: "used the chain rule", note: "old" }),
+			"r1",
+		)!;
+		assert.match(md, /\*\(the learner's thinking: used the chain rule\)\*/);
+		assert.doesNotMatch(md, /old/);
 	});
 
 	it("explain results: the learner's own words are shown", () => {
@@ -125,6 +135,26 @@ describe("messageMarkdown", () => {
 			"r2",
 		)!;
 		assert.match(free, /The learner answered: because/);
+	});
+
+	it("ask blocks: current OptionAnswer records render their labels, with the learner's thinking", () => {
+		const md = messageMarkdown(
+			result("r1", "a1", "ask_user_question", {
+				questionText: "Which way?",
+				dontKnow: false,
+				answers: [
+					{ index: 1, label: "North", value: "n" },
+					{ index: 3, label: "East", value: "e" },
+				],
+				other: "also up",
+				thinking: "the river runs that way",
+			}),
+			"r1",
+		)!;
+		assert.match(md, /The learner chose: North, East, also up/);
+		assert.doesNotMatch(md, /\[object Object\]/);
+		assert.match(md, /\*\(the learner's thinking: the river runs that way\)\*/);
+		assert.doesNotMatch(md, /his thinking/);
 	});
 
 	it("other clean tool results: one line; failed calls and markers: nothing", () => {
@@ -222,5 +252,28 @@ describe("sessionMarkdown", () => {
 			const hasMarkdown = messageMarkdown(message, message.id) !== null;
 			assert.equal(hasLines, isTeacher && hasMarkdown, `view lines follow teacher prose for ${message.id}`);
 		}
+	});
+});
+
+describe("confidence in the export (optional since 2026-10-26)", () => {
+	const qd = (): QuestionData => {
+		const options = normalizeOptions([{ label: "Mercury" }, { label: "Venus" }]);
+		return { id: "q", kind: "quiz", question: "Closest planet?", mode: "single-select", options, correctIndices: [1], explanation: "x", createdAt: "t" };
+	};
+	const doc = (details: unknown) =>
+		sessionMarkdown([callMsg("a1", "q1", "quiz", { question: "Closest planet?" }), result("r1", "q1", "quiz", details)], { anchors: false });
+
+	it("a quiz answer with confidence NOT SET exports cleanly — no phantom 50, no null", () => {
+		const unset = buildAnswer(qd(), { values: ["Mercury"] });
+		const md = doc(unset);
+		assert.match(md, /\*\*Q:\*\* Closest planet\?/);
+		assert.match(md, /The learner answered correctly\./);
+		assert.ok(!/50|null|undefined|NaN/.test(md), md);
+	});
+
+	it("an old record WITH a number and a foreign null export the same block as an unset one", () => {
+		const unset = doc(buildAnswer(qd(), { values: ["Mercury"] }));
+		assert.equal(doc(buildAnswer(qd(), { values: ["Mercury"], confidence: 70 })), unset);
+		assert.equal(doc({ ...buildAnswer(qd(), { values: ["Mercury"] }), confidence: null }), unset);
 	});
 });

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatSettings, ModelCatalogEntry, ModelCatalogResponse, ModelsSettings, UserSettings } from "@/src/core";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { prettyModel } from "@/components/usage-format";
+import { compactModelLabel, prettyModel } from "@/components/usage-format";
 import { ModelMenuList, ThinkingMenuList } from "@/components/settings/model-menu";
 import { composeSlotModel } from "@/components/settings/agent-section";
 import { MenuShell } from "@/components/menu-shell";
@@ -313,7 +313,9 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 	};
 
 	return (
-		<div ref={containerRef} className="relative flex items-center gap-1.5" data-testid="model-control">
+		// Phone (fork: mobile-layout): the control may shrink (min-w-0) so the
+		// model pill truncates on one line instead of wrapping into a blob.
+		<div ref={containerRef} className="relative flex items-center gap-1.5 phone:min-w-0" data-testid="model-control">
 			<Hint
 				// Trimmed (owner, subtlety round 2026-09-25): "Model selector"
 				// — the long sentence was way too much. ⌘K opens this same
@@ -327,13 +329,18 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 				data-testid="stats-model"
 				onClick={() => openMenu("model")}
 				aria-expanded={open === "model"}
+				aria-label={effectiveId ? `Model: ${effectiveId}` : undefined}
 				// Chrome look (owner, fix wave round 3): matches the graph
 				// view's floating top-right buttons (import notes, gear,
 				// coverage) — blurred, fuller opacity, shadowed — so the
 				// graph no longer bleeds through these pills.
-				className="flex items-center gap-1.5 rounded-full border bg-card/85 px-2.5 py-1 shadow-lg backdrop-blur transition-colors hover:border-border hover:bg-muted"
+				className="flex items-center gap-1.5 rounded-full border bg-card/85 px-2.5 py-1 shadow-lg backdrop-blur transition-colors hover:border-border hover:bg-muted phone:min-w-0 phone:whitespace-nowrap"
 			>
-				<span className="text-card-foreground">{effectiveId ? prettyModel(effectiveId) : "—"}</span>
+				<span className="text-card-foreground phone:hidden">{effectiveId ? prettyModel(effectiveId) : "—"}</span>
+				{/* Phone: the compact label, one line, ellipsized when tight. */}
+				<span className="hidden min-w-0 truncate text-card-foreground phone:block">
+					{effectiveId ? compactModelLabel(effectiveId) : "—"}
+				</span>
 				<span aria-hidden className="text-xs text-muted-foreground">▾</span>
 			</button>
 			</Hint>
@@ -359,7 +366,7 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 				// view's floating top-right buttons (import notes, gear,
 				// coverage) — blurred, fuller opacity, shadowed — so the
 				// graph no longer bleeds through these pills.
-				className="flex items-center gap-1.5 rounded-full border bg-card/85 px-2.5 py-1 shadow-lg backdrop-blur transition-colors hover:border-border hover:bg-muted"
+				className="flex items-center gap-1.5 rounded-full border bg-card/85 px-2.5 py-1 shadow-lg backdrop-blur transition-colors hover:border-border hover:bg-muted phone:shrink-0 phone:whitespace-nowrap"
 			>
 				{/* Just the level — the button reads like the model button reads
 				   the model name (owner, stats-control round 1). */}

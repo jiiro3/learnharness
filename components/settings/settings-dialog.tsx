@@ -50,8 +50,10 @@ import { KeysSection } from "./keys-section.tsx";
 import { Hint } from "@/components/ui/hint";
 import { AppearanceSection, GraphSection } from "./appearance-section.tsx";
 import { KeyboardSection } from "./keyboard-section.tsx";
+import { AdvancedSection } from "./advanced-section.tsx";
 import { ChatGPTUIProvider } from "./chatgpt-connection.tsx";
 import { NativeSubscriptionUIProvider } from "./subscription-connections.tsx";
+import { useIsPhone } from "@/components/phone";
 
 /** Owner (2026-09-20): hints earn their place — mechanics-explaining
  *  prose is out; only the keyboard note stays (storage location is a
@@ -62,9 +64,15 @@ const SECTIONS = [
 	{ id: "appearance", label: "Appearance" },
 	{ id: "graph", label: "Graph" },
 	{ id: "keyboard", label: "Keyboard", hint: "Stored on this device" },
+	// Developer knobs (fork: mobile-layout): the graph's region tuning,
+	// moved out of the graph view's display popover.
+	{ id: "advanced", label: "Advanced" },
 	{ id: "general", label: "General" },
 ] as const;
 type SectionId = (typeof SECTIONS)[number]["id"];
+
+/** Phone: no hardware keyboard, so no Keyboard section (fork: mobile-layout). */
+const PHONE_HIDDEN_SECTIONS: ReadonlySet<SectionId> = new Set(["keyboard"]);
 
 /** `open(section?, row?)` — the optional ROW deep-links into the Keys
  *  section with that row unfolded (zero-keys wave: the dictation error's
@@ -179,7 +187,31 @@ export function SettingsDialogBody({
 			window.removeEventListener(MENU_CLOSE_EVENT, onClose);
 		};
 	}, []);
-	const [active, setActive] = useState<SectionId>(initialSection);
+	const [selected, setActive] = useState<SectionId>(initialSection);
+	const isPhone = useIsPhone();
+	// A section the phone hides (a deep link, or a resize across the phone
+	// line) lands on the default section instead of a tab that isn't there.
+	const active: SectionId = isPhone && PHONE_HIDDEN_SECTIONS.has(selected) ? "keys" : selected;
+	// The phone's horizontally scrolling tab strip: a fade on the right edge
+	// while more tabs are off-screen, so the last ones don't read as missing.
+	const navRef = useRef<HTMLElement | null>(null);
+	const [moreTabsRight, setMoreTabsRight] = useState(false);
+	useEffect(() => {
+		const nav = navRef.current;
+		if (!isPhone || !nav) {
+			setMoreTabsRight(false);
+			return;
+		}
+		const measure = () => setMoreTabsRight(nav.scrollLeft + nav.clientWidth < nav.scrollWidth - 1);
+		measure();
+		nav.addEventListener("scroll", measure, { passive: true });
+		const ro = new ResizeObserver(measure);
+		ro.observe(nav);
+		return () => {
+			nav.removeEventListener("scroll", measure);
+			ro.disconnect();
+		};
+	}, [isPhone]);
 	// A deep-link fired while the dialog is ALREADY open (first exercised by
 	// the wave-6 embedding picker's "Add a provider key first…" link — the
 	// picker itself died with wave 7, the mechanism is general) changes
@@ -302,7 +334,12 @@ export function SettingsDialogBody({
 			<div className="flex min-h-0 flex-1 phone:flex-col">
 				{/* Left nav — text-only, the session-list mono language,
 					    active = bg-accent. */}
+				{/* `contents` on desktop: the wrapper generates no box, so the nav
+				    stays the row's flex item exactly as before. On phone it is
+				    the positioning box for the scroll fade. */}
+				<div className="contents phone:relative phone:block phone:shrink-0">
 				<nav
+					ref={navRef}
 					aria-label="Settings sections"
 					data-testid="settings-nav"
 					className="flex w-44 shrink-0 flex-col gap-1 border-r border-border p-2 phone:w-full phone:flex-row phone:overflow-x-auto phone:border-r-0 phone:border-b"
@@ -314,6 +351,8 @@ export function SettingsDialogBody({
 							data-testid={`settings-nav-${s.id}`}
 							aria-current={active === s.id}
 							className={`rounded-sm px-3 py-1.5 text-left font-ui text-sm transition-colors phone:min-h-11 phone:shrink-0 phone:whitespace-nowrap ${
+								PHONE_HIDDEN_SECTIONS.has(s.id) ? "phone:hidden " : ""
+							}${
 								active === s.id
 									? "bg-accent text-foreground"
 									: "text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -324,6 +363,14 @@ export function SettingsDialogBody({
 						</button>
 					))}
 				</nav>
+				{moreTabsRight && (
+					<div
+						aria-hidden
+						data-testid="settings-nav-fade"
+						className="pointer-events-none absolute top-0 right-0 bottom-px w-12 bg-gradient-to-l from-card to-transparent"
+					/>
+				)}
+				</div>
 
 				{/* Content column — one section at a time, this scrolls — and
 				    LOCKS while any MenuShell is open (owner ruling: no
@@ -428,6 +475,14 @@ export function SettingsDialogBody({
 									testid="section-keyboard"
 								>
 									<KeyboardSection />
+								</SettingsSection>
+							)}
+							{active === "advanced" && (
+								<SettingsSection
+									title="Advanced"
+									testid="section-advanced"
+								>
+									<AdvancedSection />
 								</SettingsSection>
 							)}
 						</div>

@@ -46,6 +46,12 @@
  * per-frame work when idle is a dirty-flag check (no rAF is scheduled at
  * all until something changes).
  *
+ * Phone (fork: mobile-layout, gated on the isPhone option): a wider pick
+ * radius plus taps on drawn labels (pickRadius), node labels floored at
+ * PHONE_MIN_LABEL_PX on screen (phoneLabelScale), and a greedy collision
+ * pass so labels never draw over each other (placeLabels). Desktop draws
+ * and picks exactly as before.
+ *
  * Unit tests cover the pure helpers (tests/graph-canvas.test.ts); the
  * class itself is DOM-bound and exercised live. Module scope stays
  * DOM-free so the file imports cleanly under Node.
@@ -146,8 +152,10 @@ export interface RendererCallbacks {
 	/** The empty stage was clicked. */
 	onStageClick: () => void;
 	/** Any camera move (pan/zoom) — the caller dismisses anchored UI and
-	 *  persists the camera (view state). */
-	onCameraMove: (transform: { k: number; x: number; y: number }) => void;
+	 *  persists the camera (view state). `view` is the viewport size the
+	 *  transform belongs to (0×0 before the first layout) — persisted with
+	 *  it so the phone can restore the camera viewport-relative. */
+	onCameraMove: (transform: { k: number; x: number; y: number }, view: { w: number; h: number }) => void;
 	/** The live sim settled after a drag: commit the new rest state
 	 *  (the caller PUTs it to the positions ledger). */
 	onCommit: (positions: Record<string, Position>) => void;
@@ -292,6 +300,106 @@ const ZOOM_EASE_MS = 45; // wheel-zoom glide: exponential-ease time constant (~2
 /** Extra pickable radius (px) beyond the disc — the whole halo is
  *  hit-testable (the old flicker fix, minus the picking shader). */
 const PICKING_PAD = 10;
+/** Phone (fork: mobile-layout): a fingertip needs far more than the
+ *  halo. The pad is larger, and the hit radius never drops below a 44px
+ *  target (22px radius) however small the disc is on screen. Picking
+ *  stays nearest-first, so neighbors inside each other's radius still
+ *  resolve to the closer node. */
+const PHONE_PICKING_PAD = 16;
+const PHONE_MIN_PICK_RADIUS = 22;
+
+/** The on-screen pick radius around a node whose disc is nodeScreenR px.
+ *  Desktop: the disc + PICKING_PAD (unchanged). Phone: see above. Pure. */
+export function pickRadius(nodeScreenR: number, phone: boolean): number {
+	if (!phone) return nodeScreenR + PICKING_PAD;
+	return Math.max(nodeScreenR + PHONE_PICKING_PAD, PHONE_MIN_PICK_RADIUS);
+}
+
+/** Phone node labels (fork: mobile-layout): never smaller than this on
+ *  screen. Node labels are world-scaled, so at the zoom where they fade
+ *  in they were a few px tall on a 360-412px screen; below the floor they
+ *  grow to it (above it they scale with the graph as on desktop). */
+export const PHONE_MIN_LABEL_PX = 13;
+
+/** The factor phone node labels draw at: 1 once the world-scaled size
+ *  (labelSize × k) reaches the floor, larger below it. The wrap width is
+ *  proportional to the font size, so the pre-wrapped lines stay valid at
+ *  any factor. Desktop always draws at 1. Pure. */
+export function phoneLabelScale(labelSize: number, k: number): number {
+	const px = labelSize * k;
+	if (!(px > 0)) return 1;
+	return Math.max(1, PHONE_MIN_LABEL_PX / px);
+}
+
+/** Phone region labels wrap narrower (screen px): 220px is over half a
+ *  360px screen, so neighboring cluster names could never both fit. */
+const PHONE_REGION_LABEL_MAX_WIDTH = 160;
+
+/** Screen px kept clear around every placed label (phone collision pass). */
+const LABEL_COLLISION_GAP = 3;
+
+/** One label's screen rectangle (top-left origin), for the collision pass. */
+export interface LabelBox {
+	x: number;
+	y: number;
+	w: number;
+	h: number;
+}
+
+/** Greedy label placement (fork: mobile-layout): walk the boxes in
+ *  PRIORITY order (first = most important) and keep each one that does
+ *  not come within `gap` px of a box already kept. The result is the
+ *  keep-flag per input box: kept labels never overlap, and a label is
+ *  only ever dropped in favor of a more important one. Pure. */
+export function placeLabels(boxes: readonly LabelBox[], gap: number): boolean[] {
+	const kept: LabelBox[] = [];
+	const out: boolean[] = new Array(boxes.length);
+	for (let i = 0; i < boxes.length; i++) {
+		const b = boxes[i]!;
+		let clear = true;
+		for (const o of kept) {
+			if (
+				b.x < o.x + o.w + gap &&
+				o.x < b.x + b.w + gap &&
+				b.y < o.y + o.h + gap &&
+				o.y < b.y + b.h + gap
+			) {
+				clear = false;
+				break;
+			}
+		}
+		out[i] = clear;
+		if (clear) kept.push(b);
+	}
+	return out;
+}
+
+/** Node-label priority for the collision pass: most-connected first
+ *  (degree over the given edges; the hubs are what a zoomed-out reader
+ *  needs named), ties by the shorter label (more of them fit), then id
+ *  for a stable order frame to frame. Implication nodes never carry a
+ *  label and are left out. Pure. */
+export function nodeLabelOrder(
+	nodes: readonly { id: string; label: string }[],
+	edges: readonly { from: string; to: string }[],
+): string[] {
+	const degree = new Map<string, number>();
+	for (const e of edges) {
+		degree.set(e.from, (degree.get(e.from) ?? 0) + 1);
+		degree.set(e.to, (degree.get(e.to) ?? 0) + 1);
+	}
+	return nodes
+		.filter((n) => !isImpNodeId(n.id))
+		.map((n) => ({ id: n.id, d: degree.get(n.id) ?? 0, len: n.label.length }))
+		.sort((a, b) => b.d - a.d || a.len - b.len || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+		.map((n) => n.id);
+}
+
+/** The +/− zoom step (fork: mobile-layout): the next zoom from k by
+ *  `factor`, clamped into the scale extent. Pure. */
+export function zoomStep(k: number, factor: number): number {
+	return Math.min(Math.max(k * factor, SCALE_EXTENT[0]), SCALE_EXTENT[1]);
+}
 
 /** Click vs drag threshold: pointer travel under this many px is a click. */
 const CLICK_SLOP = 4;
@@ -438,6 +546,100 @@ export function fitTransform(
 	return { x: w / 2 - cx * k, y: h / 2 - cy * k, k };
 }
 
+/** d3-zoom's scale extent for the renderer (kept here so the pure
+ *  framing helper clamps to the same range). */
+export const SCALE_EXTENT: [number, number] = [0.02, 40];
+
+/** A camera as the caller persists it (fork: mobile-layout): the d3
+ *  transform plus, when known, the viewport size it was taken in. The
+ *  size makes the raw pixel translate viewport-relative again — see
+ *  reanchorCamera. */
+export interface SavedCamera {
+	k: number;
+	x: number;
+	y: number;
+	w?: number;
+	h?: number;
+}
+
+/** Validate a persisted camera (localStorage JSON): null for any shape
+ *  that is not a finite transform with k > 0. The viewport size is kept
+ *  only when both sides are real (≥ 10px — a hidden canvas reports 0). */
+export function parseSavedCamera(raw: unknown): SavedCamera | null {
+	if (!raw || typeof raw !== "object") return null;
+	const { k, x, y, w, h } = raw as Record<string, unknown>;
+	const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+	if (!finite(k) || k <= 0 || !finite(x) || !finite(y)) return null;
+	if (finite(w) && finite(h) && w >= 10 && h >= 10) return { k, x, y, w, h };
+	return { k, x, y };
+}
+
+/** Re-express a camera taken in a fromW×fromH viewport for a toW×toH
+ *  one, keeping the SAME world point under the viewport center at the
+ *  same zoom (the resize anchor, 2026-09-17). Identity when the sizes
+ *  match. */
+export function reanchorCamera(
+	t: { k: number; x: number; y: number },
+	fromW: number,
+	fromH: number,
+	toW: number,
+	toH: number,
+): { k: number; x: number; y: number } {
+	const wx = (fromW / 2 - t.x) / t.k;
+	const wy = (fromH / 2 - t.y) / t.k;
+	return { k: t.k, x: toW / 2 - wx * t.k, y: toH / 2 - wy * t.k };
+}
+
+/** The transform a persisted camera restores to in a w×h viewport. With
+ *  `anchored` (phone) and a recorded viewport size, the camera is
+ *  re-centered for the new size (rotation, the soft keyboard, a split
+ *  screen); otherwise the raw pixel transform applies unchanged (the
+ *  desktop behavior, and legacy entries without a size). */
+export function restoreCamera(
+	saved: SavedCamera,
+	w: number,
+	h: number,
+	anchored: boolean,
+): { k: number; x: number; y: number } {
+	if (anchored && saved.w !== undefined && saved.h !== undefined) return reanchorCamera(saved, saved.w, saved.h, w, h);
+	return { k: saved.k, x: saved.x, y: saved.y };
+}
+
+/** True when any part of the world bbox lands inside the w×h viewport
+ *  under transform t (screen = world·k + [x,y]). */
+export function bboxOnScreen(
+	bbox: { minX: number; maxX: number; minY: number; maxY: number },
+	t: { k: number; x: number; y: number },
+	w: number,
+	h: number,
+): boolean {
+	const left = bbox.minX * t.k + t.x;
+	const right = bbox.maxX * t.k + t.x;
+	const top = bbox.minY * t.k + t.y;
+	const bottom = bbox.maxY * t.k + t.y;
+	return right >= 0 && left <= w && bottom >= 0 && top <= h;
+}
+
+/** Frame `bbox` like fitTransform, but never zoomed in past maxK (a
+ *  single node's bbox is a point — its fit zoom is infinite) and always
+ *  inside the renderer's scale extent. Used to take the camera to search
+ *  matches (fork: mobile-layout). */
+export function frameTransform(
+	bbox: { minX: number; maxX: number; minY: number; maxY: number },
+	w: number,
+	h: number,
+	padding: number,
+	maxK: number,
+): { x: number; y: number; k: number } {
+	// A viewport smaller than the padding would yield k ≤ 0: drop the pad.
+	const pad = Math.min(padding, Math.max(0, Math.min(w, h) / 2 - 1));
+	const fit = fitTransform(bbox, w, h, pad);
+	const k = Math.min(Math.max(Math.min(fit.k, maxK), SCALE_EXTENT[0]), SCALE_EXTENT[1]);
+	const cx = (bbox.minX + bbox.maxX) / 2;
+	const cy = (bbox.minY + bbox.maxY) / 2;
+	return { x: w / 2 - cx * k, y: h / 2 - cy * k, k };
+}
+
 /** The arrowhead geometry for a directed edge a→b: shaft endpoints
  *  (clear of both node discs) and the head triangle (tip on the target
  *  disc edge, wideness = 0.8 × head length — the sigma arrow shape). */
@@ -577,6 +779,18 @@ export class GraphCanvasRenderer {
 	 *  callbacks already see the NEW size in clientWidth/Height). */
 	private viewW = 0;
 	private viewH = 0;
+	/** Phone only (fork: mobile-layout): the last REAL size (≥ 10px). A
+	 *  canvas hidden at 0×0 and shown again re-anchors from here instead of
+	 *  skipping the anchor (the raw translate then drifted off-center). */
+	private anchorW = 0;
+	private anchorH = 0;
+	/** Phone only: the persisted camera, applied at the first real size
+	 *  (viewport-relative — see restoreCamera). */
+	private pendingCamera: SavedCamera | null = null;
+	/** Phone only: a restored camera is checked once against the first
+	 *  data — a camera that shows none of the graph re-fits instead. */
+	private recoverCheck = false;
+	private isPhone: () => boolean;
 	/** The k that frames the whole graph — the label-gate's "1×". */
 	private kFit = 1;
 	/** World-space bounds of the current nodes — fit() and the resize-time
@@ -652,7 +866,16 @@ export class GraphCanvasRenderer {
 	/** World rect the bitmap covers (drawImage target coords). */
 	private regionRect: { minX: number; minY: number; w: number; h: number } | null = null;
 	/** Region labels: cluster centroid + hue, computed at splat build. */
-	private regionMeta: { id: string; label: string | null; lines: string[] | null; cx: number; cy: number; hue: number }[] = [];
+	private regionMeta: {
+		id: string;
+		label: string | null;
+		lines: string[] | null;
+		cx: number;
+		cy: number;
+		hue: number;
+		/** Visible member count — the phone collision pass's priority. */
+		members: number;
+	}[] = [];
 	private regionTuning: RegionTuning = DEFAULT_REGION_TUNING;
 	private physicsTuning: PhysicsTuning = DEFAULT_PHYSICS_TUNING;
 	/** Gravity center for the live sim (graph bbox centroid at setData). */
@@ -660,6 +883,22 @@ export class GraphCanvasRenderer {
 	private regionBuiltVersion = -1;
 	private frameCount = 0; // draw counter for the live-sim splat throttle
 	private labelLines = new Map<string, string[]>();
+	/** Phone only: each node label's widest line, world units at the base
+	 *  label size (the collision pass scales it per frame). */
+	private labelWidths = new Map<string, number>();
+	/** Phone only: node ids in label priority order (nodeLabelOrder),
+	 *  computed per setData — positions never change it. */
+	private labelOrder: string[] = [];
+	/** Phone only: the node labels the last frame drew, as screen rects —
+	 *  a tap on a drawn label picks its node. */
+	private drawnLabelBoxes: (LabelBox & { id: string })[] = [];
+	/** Phone only: region-label line widths (screen px at the cluster
+	 *  label size), keyed by font + text; cleared when the font changes. */
+	private regionLineWidths = new Map<string, number>();
+	private regionWidthFont = "";
+	/** Whether the cached geometry was built for the phone layout (the
+	 *  region-label wrap width differs); a flip forces a rebuild. */
+	private geoPhone = false;
 	private worldLabelFont = "";
 	private world: WorldSizes = { nodeR: 0, glowOuter: 0, labelSize: 0, labelGap: 0 };
 
@@ -670,8 +909,15 @@ export class GraphCanvasRenderer {
 		 *  present it REPLACES the first-open fit; the graph opens exactly
 		 *  where the user left it (2026-09-15: a default zoom exists only
 		 *  on first open, ever). Invalid shapes fall back to fit. */
-		initialCamera?: { k: number; x: number; y: number } | null,
+		initialCamera?: SavedCamera | null,
+		/** Fork: mobile-layout — true while the phone layout applies. The
+		 *  phone restores the camera viewport-relative, re-anchors across a
+		 *  hidden (0×0) phase, and re-fits a restored camera that shows
+		 *  none of the graph. Desktop behavior is unchanged without it. */
+		options?: { isPhone?: () => boolean },
 	) {
+		this.isPhone = options?.isPhone ?? (() => false);
+		this.geoPhone = this.isPhone();
 		this.canvas = canvas;
 		const ctx = canvas.getContext("2d");
 		if (!ctx) throw new Error("2d context unavailable");
@@ -681,7 +927,7 @@ export class GraphCanvasRenderer {
 		// d3-zoom owns pan / wheel zoom-to-cursor / touch pinch; every
 		// transform change just marks dirty (draws happen in OUR loop).
 		this.zoomBehavior = zoom<HTMLCanvasElement, unknown>()
-			.scaleExtent([0.02, 40])
+			.scaleExtent(SCALE_EXTENT)
 			// Touch (fork: mobile-layout): pointer events fire BEFORE touch
 			// events, so by touchstart a finger on a node has already claimed
 			// it (dragId) — a one-finger touch then belongs to the node drag,
@@ -695,7 +941,7 @@ export class GraphCanvasRenderer {
 				this.transform = transform;
 				this.markDirty();
 				// The transform doubles as the persistence payload (view state).
-				this.callbacks.onCameraMove(transform);
+				this.callbacks.onCameraMove(transform, { w: this.viewW, h: this.viewH });
 			});
 		select(canvas)
 			.call(this.zoomBehavior)
@@ -720,16 +966,18 @@ export class GraphCanvasRenderer {
 		// left the graph. Applied through the zoom behavior so d3's internal
 		// state and ours agree (the same path fit() uses); hasFit so neither
 		// the ResizeObserver nor setData re-fits over it.
-		if (
-			initialCamera &&
-			typeof initialCamera.k === "number" && Number.isFinite(initialCamera.k) && initialCamera.k > 0 &&
-			typeof initialCamera.x === "number" && Number.isFinite(initialCamera.x) &&
-			typeof initialCamera.y === "number" && Number.isFinite(initialCamera.y)
-		) {
+		const restored = parseSavedCamera(initialCamera);
+		if (restored && this.isPhone()) {
+			// Phone: applied at the first real size (end of constructor or
+			// the ResizeObserver), re-centered for that size.
+			this.hasFit = true;
+			this.pendingCamera = restored;
+			this.recoverCheck = true;
+		} else if (restored) {
 			this.hasFit = true;
 			select(canvas).call(
 				this.zoomBehavior.transform,
-				zoomIdentity.translate(initialCamera.x, initialCamera.y).scale(initialCamera.k),
+				zoomIdentity.translate(restored.x, restored.y).scale(restored.k),
 			);
 		}
 
@@ -739,23 +987,29 @@ export class GraphCanvasRenderer {
 			// BEFORE syncSize (which updates viewW/H to the new size).
 			const prevW = this.viewW;
 			const prevH = this.viewH;
-			const { x: tx, y: ty, k } = this.transform;
-			const wx = (prevW / 2 - tx) / k;
-			const wy = (prevH / 2 - ty) / k;
+			const before = { k: this.transform.k, x: this.transform.x, y: this.transform.y };
 			this.syncSize();
 			if (!this.hasFit) this.fit(); // first real size → fit once
+			else if (this.pendingCamera) this.applyPendingCamera(); // phone restore
 			else {
 				this.refreshFitZoom(); // the gate's "1×" is viewport-bound
 				// Center-anchor (2026-09-17, owner): same world point under
 				// the NEW center. Applied through the zoom behavior like every
 				// camera move (d3 state, persistence, card-dismiss all agree).
-				if (prevW > 0 && prevH > 0 && this.viewW > 0 && this.viewH > 0) {
-					select(canvas).call(
-						this.zoomBehavior.transform,
-						zoomIdentity.translate(this.viewW / 2 - wx * k, this.viewH / 2 - wy * k).scale(k),
-					);
+				// Phone (fork: mobile-layout): a hidden 0×0 phase anchors
+				// from the last real size, and 0×0 itself is never applied.
+				const phone = this.isPhone();
+				const fromW = phone && prevW < 10 ? this.anchorW : prevW;
+				const fromH = phone && prevH < 10 ? this.anchorH : prevH;
+				const ok = phone
+					? fromW >= 10 && fromH >= 10 && this.viewW >= 10 && this.viewH >= 10
+					: prevW > 0 && prevH > 0 && this.viewW > 0 && this.viewH > 0;
+				if (ok) {
+					const t = reanchorCamera(before, fromW, fromH, this.viewW, this.viewH);
+					select(canvas).call(this.zoomBehavior.transform, zoomIdentity.translate(t.x, t.y).scale(t.k));
 				}
 			}
+			this.noteRealSize();
 			// Redraw SYNCHRONOUSLY: syncSize may have reallocated the backing
 			// store (which clears the canvas), and during live window resizes
 			// rAF is starved by relayout — a deferred draw would leave the
@@ -764,6 +1018,39 @@ export class GraphCanvasRenderer {
 		});
 		this.resizeObserver.observe(canvas);
 		this.syncSize();
+		this.noteRealSize();
+		if (this.pendingCamera) this.applyPendingCamera();
+	}
+
+	/** Phone: remember the last real viewport size (the re-anchor source
+	 *  after a hidden phase). */
+	private noteRealSize(): void {
+		if (this.viewW >= 10 && this.viewH >= 10) {
+			this.anchorW = this.viewW;
+			this.anchorH = this.viewH;
+		}
+	}
+
+	/** Phone: apply the persisted camera once the viewport has a real
+	 *  size, re-centered for it (restoreCamera). Waits while 0×0. */
+	private applyPendingCamera(): void {
+		const saved = this.pendingCamera;
+		if (!saved || this.viewW < 10 || this.viewH < 10) return;
+		this.pendingCamera = null;
+		this.refreshFitZoom();
+		const t = restoreCamera(saved, this.viewW, this.viewH, true);
+		select(this.canvas).call(this.zoomBehavior.transform, zoomIdentity.translate(t.x, t.y).scale(t.k));
+		this.recoverIfOffscreen();
+	}
+
+	/** Phone: once, after a restored camera AND the first data exist — a
+	 *  camera that shows none of the graph (an old drifted view) re-fits,
+	 *  so the graph never opens on an empty stage. */
+	private recoverIfOffscreen(): void {
+		if (!this.recoverCheck || this.pendingCamera || !this.worldBBox || !this.data?.nodes.length) return;
+		if (this.viewW < 10 || this.viewH < 10) return;
+		this.recoverCheck = false;
+		if (!bboxOnScreen(this.worldBBox, this.transform, this.viewW, this.viewH)) this.fit();
 	}
 
 	// ── Public API ──
@@ -782,10 +1069,14 @@ export class GraphCanvasRenderer {
 			if (n.y > maxY) maxY = n.y;
 		}
 		this.worldBBox = { minX, maxX, minY, maxY };
+		this.labelOrder = nodeLabelOrder(data.nodes, data.logicalEdges ?? data.edges);
 		if (!this.hasFit && data.nodes.length > 0) this.fit();
 		// The camera may be user-restored (constructor initialCamera) — the
 		// gate's "1×" reference still needs the fresh bbox's fit zoom.
-		else this.refreshFitZoom();
+		else {
+			this.refreshFitZoom();
+			this.recoverIfOffscreen(); // phone only (set by the phone restore)
+		}
 		// Rebuild the live sim around the fresh nodes. New data means the
 		// server spoke (merge or refetch); any pending commit is moot and
 		// the graph is at rest until the next drag.
@@ -871,7 +1162,7 @@ export class GraphCanvasRenderer {
 			data.clusters,
 			this.regionMeta,
 			labels,
-			REGION_LABEL_MAX_WIDTH,
+			this.geoPhone ? PHONE_REGION_LABEL_MAX_WIDTH : REGION_LABEL_MAX_WIDTH,
 			REGION_LABEL_MAX_LINES,
 			(s) => ctx.measureText(s).width,
 		);
@@ -900,6 +1191,52 @@ export class GraphCanvasRenderer {
 			this.zoomBehavior.transform,
 			zoomIdentity.translate(t.x, t.y).scale(t.k),
 		);
+	}
+
+	/** The fit/recenter control (fork: mobile-layout): frame the whole
+	 *  graph now, cancelling any wheel glide in flight. */
+	recenter(): void {
+		this.zoomTarget = null;
+		this.fit();
+	}
+
+	/** The +/− controls (fork: mobile-layout): zoom by `factor` about the
+	 *  viewport center, on the same eased glide the wheel uses. Repeated
+	 *  taps compound from the glide's target, not the half-done camera. */
+	zoomBy(factor: number): void {
+		if (this.viewW < 10 || this.viewH < 10) return;
+		const k = zoomStep(this.zoomTarget?.k ?? this.transform.k, factor);
+		this.zoomTarget = { k, x: this.viewW / 2, y: this.viewH / 2 };
+		this.lastTickAt = performance.now();
+		this.markDirty();
+	}
+
+	/** Take the camera to these nodes (search matches — fork:
+	 *  mobile-layout): frame their current positions, zooming in no
+	 *  further than the current zoom or the zoom where node labels show,
+	 *  whichever is closer. Unknown ids are ignored; no ids → no move. */
+	frameNodes(ids: Iterable<string>): void {
+		let minX = Infinity;
+		let minY = Infinity;
+		let maxX = -Infinity;
+		let maxY = -Infinity;
+		for (const id of ids) {
+			const n = this.nodeById.get(id);
+			if (!n) continue;
+			if (n.x < minX) minX = n.x;
+			if (n.y < minY) minY = n.y;
+			if (n.x > maxX) maxX = n.x;
+			if (n.y > maxY) maxY = n.y;
+		}
+		if (minX === Infinity) return;
+		const w = this.canvas.clientWidth;
+		const h = this.canvas.clientHeight;
+		if (w < 10 || h < 10) return;
+		this.refreshFitZoom();
+		const kLabel = this.settings ? this.kFit / this.settings.labelZoom : this.kFit;
+		const t = frameTransform({ minX, maxX, minY, maxY }, w, h, 60, Math.max(this.transform.k, kLabel));
+		this.zoomTarget = null;
+		select(this.canvas).call(this.zoomBehavior.transform, zoomIdentity.translate(t.x, t.y).scale(t.k));
 	}
 
 	/** Refresh the label-gate's "1×" reference from the current bbox +
@@ -971,6 +1308,9 @@ export class GraphCanvasRenderer {
 			}
 			return;
 		}
+		// Phone: a finger has no hover — a pan sweeping over nodes (with the
+		// phone's wide pick radius) would only flash glows along its path.
+		if (e.pointerType === "touch" && this.isPhone()) return;
 		const node = this.pickAt(pos.x, pos.y);
 		if ((node?.id ?? null) !== this.hoverId) this.setHover(node?.id ?? null);
 		this.canvas.style.cursor = node ? "pointer" : "";
@@ -1127,7 +1467,8 @@ export class GraphCanvasRenderer {
 		// nodeSize is world units now (2026-09-15): the on-screen hit radius
 		// is the disc's world radius × the camera zoom, plus the constant
 		// screen pad — the whole halo stays hit-testable.
-		const maxDist = this.settings.nodeSize * k + PICKING_PAD;
+		const phone = this.isPhone();
+		const maxDist = pickRadius(this.settings.nodeSize * k, phone);
 		const projected: { id: string; x: number; y: number }[] = [];
 		for (const n of this.data.nodes) {
 			if (this.visible && !this.visible.has(n.id)) continue;
@@ -1135,8 +1476,15 @@ export class GraphCanvasRenderer {
 			projected.push({ id: n.id, x: n.x * k + tx, y: n.y * k + ty });
 		}
 		const hit = pickNearest(projected, px, py, maxDist);
-		if (!hit) return null;
-		return this.nodeById.get(hit.id) ?? null;
+		if (hit) return this.nodeById.get(hit.id) ?? null;
+		// Phone: a drawn label is part of its node's target (the label is
+		// what the reader aims at). Only labels the last frame showed.
+		if (phone) {
+			for (const b of this.drawnLabelBoxes) {
+				if (px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h) return this.nodeById.get(b.id) ?? null;
+			}
+		}
+		return null;
 	}
 
 	private setHover(nodeId: string | null): void {
@@ -1360,8 +1708,17 @@ export class GraphCanvasRenderer {
 		const prevFont = ctx.font;
 		ctx.font = this.worldLabelFont;
 		const maxW = LABEL_MAX_WIDTH * (settings.labelSize / LABEL_SIZE);
+		this.labelWidths = new Map();
 		for (const n of data.nodes) {
-			if (isVisible(n.id) && !isImpNodeId(n.id)) this.labelLines.set(n.id, wrapLabel(ctx, n.label, maxW));
+			if (!isVisible(n.id) || isImpNodeId(n.id)) continue;
+			const lines = wrapLabel(ctx, n.label, maxW);
+			this.labelLines.set(n.id, lines);
+			// Phone: the collision pass needs each label's footprint.
+			if (this.geoPhone) {
+				let widest = 0;
+				for (const line of lines) widest = Math.max(widest, ctx.measureText(line).width);
+				this.labelWidths.set(n.id, widest);
+			}
 		}
 		ctx.font = prevFont;
 	}
@@ -1481,6 +1838,7 @@ export class GraphCanvasRenderer {
 					cy: sumY / members,
 					hue: clusterHue(cluster.id),
 					lines: null,
+					members,
 				});
 			}
 		});
@@ -1495,9 +1853,10 @@ export class GraphCanvasRenderer {
 			const ctx = this.ctx;
 			const prevFont = ctx.font;
 			ctx.font = `${LABEL_WEIGHT} ${settings.clusterLabelSize}px ${data.fontFamily}`;
+			const maxWidth = this.geoPhone ? PHONE_REGION_LABEL_MAX_WIDTH : REGION_LABEL_MAX_WIDTH;
 			for (const rm of this.regionMeta) {
 				rm.lines = rm.label
-					? wrapRegionLabel(rm.label, REGION_LABEL_MAX_WIDTH, REGION_LABEL_MAX_LINES, (s) => ctx.measureText(s).width)
+					? wrapRegionLabel(rm.label, maxWidth, REGION_LABEL_MAX_LINES, (s) => ctx.measureText(s).width)
 					: null;
 			}
 			ctx.font = prevFont;
@@ -1664,6 +2023,95 @@ export class GraphCanvasRenderer {
 		this.regionRect = { minX, minY, w: spanX, h: spanY };
 	}
 
+	/** Phone: which labels draw this frame. Every on-screen label becomes
+	 *  a screen rect; the more opaque kind (node vs region labels, which
+	 *  cross-fade on the zoom gate) is placed first, each kind in its own
+	 *  priority order (regions: most members; nodes: nodeLabelOrder), and
+	 *  placeLabels drops anything that would overlap a label already
+	 *  kept. Also records the kept node-label rects for tap picking. */
+	private planPhoneLabels(
+		settings: GraphRenderSettings,
+		data: CanvasData,
+		nodeAlpha: number,
+		regionAlpha: number,
+		scale: number,
+		w: number,
+		h: number,
+	): { nodes: Set<string>; regions: Set<string> } {
+		const { x: tx, y: ty, k } = this.transform;
+		const offscreen = (b: LabelBox) => b.x > w || b.x + b.w < 0 || b.y > h || b.y + b.h < 0;
+		const nodeBoxes: (LabelBox & { id: string })[] = [];
+		if (nodeAlpha > 0.01) {
+			const size = settings.labelSize * scale * k; // screen px
+			const lineH = size * LABEL_LINE_HEIGHT;
+			const gap = LABEL_GAP * scale;
+			for (const id of this.labelOrder) {
+				const lines = this.labelLines.get(id);
+				const n = this.nodeById.get(id);
+				if (!lines || lines.length === 0 || !n) continue;
+				const bw = (this.labelWidths.get(id) ?? 0) * scale * k;
+				const box = {
+					id,
+					x: n.x * k + tx - bw / 2,
+					y: (n.y + this.world.nodeR + gap) * k + ty,
+					w: bw,
+					h: lineH * (lines.length - 1) + size,
+				};
+				if (!offscreen(box)) nodeBoxes.push(box);
+			}
+		}
+		const regionBoxes: (LabelBox & { id: string })[] = [];
+		if (settings.clusterLabels && regionAlpha > 0.01) {
+			const font = `${LABEL_WEIGHT} ${settings.clusterLabelSize}px ${data.fontFamily}`;
+			if (font !== this.regionWidthFont) {
+				this.regionLineWidths.clear();
+				this.regionWidthFont = font;
+			}
+			const ctx = this.ctx;
+			const prevFont = ctx.font;
+			ctx.font = font;
+			const size = settings.clusterLabelSize;
+			const lineH = size * REGION_LABEL_LINE_HEIGHT;
+			const ordered = this.regionMeta
+				.filter((rm) => rm.lines && rm.lines.length > 0)
+				.sort((a, b) => b.members - a.members || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+			for (const rm of ordered) {
+				const lines = rm.lines!;
+				let bw = 0;
+				for (const line of lines) {
+					let lw = this.regionLineWidths.get(line);
+					if (lw === undefined) {
+						lw = ctx.measureText(line).width;
+						this.regionLineWidths.set(line, lw);
+					}
+					bw = Math.max(bw, lw);
+				}
+				const bh = lineH * (lines.length - 1) + size;
+				const box = { id: rm.id, x: rm.cx * k + tx - bw / 2, y: rm.cy * k + ty - bh / 2, w: bw, h: bh };
+				if (!offscreen(box)) regionBoxes.push(box);
+			}
+			ctx.font = prevFont;
+		}
+		const nodesFirst = nodeAlpha >= regionAlpha;
+		const first = nodesFirst ? nodeBoxes : regionBoxes;
+		const all = nodesFirst ? [...nodeBoxes, ...regionBoxes] : [...regionBoxes, ...nodeBoxes];
+		const keep = placeLabels(all, LABEL_COLLISION_GAP);
+		const nodes = new Set<string>();
+		const regions = new Set<string>();
+		const drawn: (LabelBox & { id: string })[] = [];
+		for (let i = 0; i < all.length; i++) {
+			if (!keep[i]) continue;
+			const isNode = nodesFirst ? i < first.length : i >= first.length;
+			if (isNode) {
+				nodes.add(all[i]!.id);
+				drawn.push(all[i]!);
+			} else regions.add(all[i]!.id);
+		}
+		// Tappable only while the labels read as present (not mid-fade).
+		this.drawnLabelBoxes = nodeAlpha > 0.5 ? drawn : [];
+		return { nodes, regions };
+	}
+
 	/** THE draw function: every layer, one frame, one camera. All drawing
 	 *  happens in WORLD coordinates under the camera transform; nothing is
 	 *  recomputed per frame except layer styling. */
@@ -1679,6 +2127,14 @@ export class GraphCanvasRenderer {
 
 		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 		ctx.clearRect(0, 0, w, h);
+
+		// Phone layout flips (a resize across the phone line) rebuild the
+		// geometry: the region-label wrap width and label footprints differ.
+		const phone = this.isPhone();
+		if (phone !== this.geoPhone) {
+			this.geoPhone = phone;
+			this.geoVersion++;
+		}
 
 		this.frameCount++;
 		// Regions: rebuild on stale geometry at rest; during the live sim,
@@ -1731,16 +2187,36 @@ export class GraphCanvasRenderer {
 		ctx.fillStyle = data.colors.node;
 		ctx.fill(this.nodesPath);
 
+		// Phone (fork: mobile-layout): node labels draw at least
+		// PHONE_MIN_LABEL_PX tall, and a collision pass decides which
+		// labels (node AND region) draw at all — no two ever overlap.
+		// Desktop: scale 1, no pass, every label draws (unchanged).
+		const labelScale = phone ? phoneLabelScale(settings.labelSize, k) : 1;
+		const labelWorld: WorldSizes = phone
+			? { ...this.world, labelSize: settings.labelSize * labelScale, labelGap: LABEL_GAP * labelScale }
+			: this.world;
+		const labelFont = phone ? `${LABEL_WEIGHT} ${labelWorld.labelSize}px ${data.fontFamily}` : this.worldLabelFont;
+		const plan = phone ? this.planPhoneLabels(settings, data, nodeAlpha, regionAlpha, labelScale, w, h) : null;
+		if (!plan) this.drawnLabelBoxes = [];
+
 		// 6. Node labels — one global gate, faded together. World-scaled
 		// with the graph (they grow as you zoom in, Obsidian-style).
 		if (nodeAlpha > 0.01) {
 			ctx.save();
 			ctx.globalAlpha = nodeAlpha;
-			ctx.font = this.worldLabelFont;
-			for (const [id, lines] of this.labelLines) {
-				const n = this.nodeById.get(id);
-				if (!n) continue;
-				drawNameLines(ctx, n.x, n.y, lines, this.world, data.colors.label);
+			ctx.font = labelFont;
+			if (plan) {
+				for (const id of plan.nodes) {
+					const n = this.nodeById.get(id);
+					const lines = this.labelLines.get(id);
+					if (n && lines) drawNameLines(ctx, n.x, n.y, lines, labelWorld, data.colors.label);
+				}
+			} else {
+				for (const [id, lines] of this.labelLines) {
+					const n = this.nodeById.get(id);
+					if (!n) continue;
+					drawNameLines(ctx, n.x, n.y, lines, this.world, data.colors.label);
+				}
 			}
 			ctx.restore();
 		}
@@ -1764,8 +2240,8 @@ export class GraphCanvasRenderer {
 				ctx.fill("evenodd");
 				ctx.save();
 				ctx.globalAlpha = this.hoverFade;
-				ctx.font = this.worldLabelFont;
-				drawNameLines(ctx, n.x, n.y, this.labelLines.get(n.id) ?? [], this.world, data.colors.hoverText);
+				ctx.font = labelFont;
+				drawNameLines(ctx, n.x, n.y, this.labelLines.get(n.id) ?? [], labelWorld, data.colors.hoverText);
 				ctx.restore();
 			}
 		}
@@ -1791,6 +2267,7 @@ export class GraphCanvasRenderer {
 			const lineH = (settings.clusterLabelSize * REGION_LABEL_LINE_HEIGHT) / k;
 			for (const rm of this.regionMeta) {
 				if (!rm.lines) continue;
+				if (plan && !plan.regions.has(rm.id)) continue; // phone: lost the collision pass
 				ctx.fillStyle = `hsla(${rm.hue}, 55%, 78%, 0.85)`;
 				const firstOffset = (-(rm.lines.length - 1) / 2) * lineH;
 				for (let i = 0; i < rm.lines.length; i++) {

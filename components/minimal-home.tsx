@@ -21,7 +21,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ListTreeIcon, UploadIcon } from "lucide-react";
 import { ChainTableOverlay } from "@/components/chain-table.tsx";
-import { GraphCostControl } from "@/components/graph-view.tsx";
+import { GraphCostControl, NOTES_ACCEPT, NOTES_ACCEPT_PHONE } from "@/components/graph-view.tsx";
+import { useIsPhone } from "@/components/phone";
 import { NotesImportErrors, useNotesImport } from "@/components/notes-import.tsx";
 import { Hint } from "@/components/ui/hint";
 import type { ChatSummary, GraphCostSummary, GraphSnapshot } from "@/src/core";
@@ -93,6 +94,7 @@ export function MinimalHome({
 	onPracticeSelectionChange?: (nodes: { id: string; name: string; statement: string }[]) => void;
 	onChainSelectClose?: () => void;
 }) {
+	const phone = useIsPhone();
 	const [snapshot, setSnapshot] = useState<GraphSnapshot | null>(null);
 	const [costs, setCosts] = useState<GraphCostSummary | null>(null);
 	const [chats, setChats] = useState<ChatSummary[]>([]);
@@ -136,7 +138,8 @@ export function MinimalHome({
 				ref={fileInputRef}
 				type="file"
 				multiple
-				accept=".md,.markdown,.txt"
+				// Phone: MIME types too, or the Android picker greys out .md files.
+				accept={phone ? NOTES_ACCEPT_PHONE : NOTES_ACCEPT}
 				className="hidden"
 				onChange={(e) => {
 					onImportFiles(e.target.files);
